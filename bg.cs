@@ -12,6 +12,7 @@ using System.IO;
 using UWin32;
 using System.Threading;
 using System.Text;
+using System.Diagnostics;
 
 namespace bg
 {
@@ -47,8 +48,12 @@ public class BGE // BG Entry
 	ReadingType m_type;
 	int m_nCarbs;
 	string m_sComment;
+	string m_sMeal;
 	int m_nMinutesSinceLastCarb;
 	int m_nCarbsInLast4Hours;
+	bool m_fInterp;
+
+	int m_nWgtAvg;
 
 	/* R E A D I N G  T Y P E  F R O M  S T R I N G */
 	/*----------------------------------------------------------------------------
@@ -114,93 +119,45 @@ public class BGE // BG Entry
 
 		
 	----------------------------------------------------------------------------*/
-	public BGE(string sDate, string sTime, ReadingType type, int bg, int nCarbs, string sComment)
+	public BGE(string sDate, string sTime, ReadingType type, int bg, int nCarbs, string sComment, string sMeal)
 	{
 		m_dttm = DateTime.Parse(sDate + " " + sTime);
 		m_nBg = bg;
 		m_type = type;
 		m_nCarbs = nCarbs;
 		m_sComment = sComment;
+		m_sMeal = sMeal;
+		m_fInterp = false;
 	}
 	
-	public int Carbs
+	public int 			Carbs 				{ get { return m_nCarbs; }  				set { m_nCarbs = value; } }
+	public int 			MinutesSinceCarbs 	{ get { return m_nMinutesSinceLastCarb; }  	set { m_nMinutesSinceLastCarb = value; } }
+	public int 			CarbsIn4 			{ get { return m_nCarbsInLast4Hours; }  	set { m_nCarbsInLast4Hours = value; } }
+	public string 		Comment				{ get { return m_sComment; }                set { m_sComment = value; } }
+	public string 		Meal				{ get { return m_sMeal; }                   set { m_sMeal = value; } }
+	public ReadingType 	Type				{ get { return m_type; }                    set { m_type = value; } }
+	public DateTime 	Date				{ get { return m_dttm; } }
+	public int 			Reading				{ get { return m_nBg; } }
+	public bool			InterpReading		{ get { return m_fInterp; }					set { m_fInterp = value; } }
+	public int 			WgtAvg				{ get { return m_nWgtAvg; } 				set { m_nWgtAvg = value; } }
+
+	public string		Key					{ get { return m_dttm.ToString("s"); } }
+
+	public string FullComment
 	{
 		get
 		{
-			return m_nCarbs;
-		}
-
-		set
-		{
-			m_nCarbs = value;
-		}
-	}
-
-	public int MinutesSinceCarbs
-	{
-		get
-		{
-			return m_nMinutesSinceLastCarb;
-		}
-
-		set
-		{
-			m_nMinutesSinceLastCarb = value;
-		}
-	}
-
-	public int CarbsIn4
-	{
-		get
-		{
-			return m_nCarbsInLast4Hours;
-		}
-
-		set
-		{
-			m_nCarbsInLast4Hours = value;
-		}
-	}
-
-	public string Comment
-	{
-		get
-		{
-			return m_sComment;
-		}
-
-		set
-		{
-			m_sComment = value;
-		}
-	}
-
-	public ReadingType Type
-	{
-		get
-		{
-			return m_type;
-		}
-
-		set
-		{
-			m_type = value;
-		}
-	}
-
-	public DateTime Date
-	{
-		get
-		{
-			return m_dttm;
-		}
-	}
-
-	public int Reading
-	{
-		get
-		{
-			return m_nBg;
+			if (m_sMeal.Length > 0)
+				{
+				if (m_sComment.Length > 0)
+					return m_sMeal + "(" + m_sComment + ")";
+				else
+					return m_sMeal;
+				}
+			if (m_sComment.Length > 0)
+				return "("+m_sComment+")";
+			else
+				return "";
 		}
 	}
 
@@ -235,6 +192,10 @@ public class BGE // BG Entry
 				return bge1.Reading - bge2.Reading;
 			case CompareType.Date:
 				return DateTime.Compare(bge1.Date, bge2.Date);
+			case CompareType.Carbs:
+				return bge1.Carbs - bge2.Carbs;
+			case CompareType.Comment:
+				return String.Compare(bge1.FullComment, bge2.FullComment);
 			default:
 				return 0; 
 			}
@@ -247,6 +208,7 @@ public class BGE // BG Entry
 		m_nBg = bge.Reading;
 		m_nCarbs = bge.Carbs;
 		m_sComment = bge.Comment;
+		m_sMeal = bge.Meal;
 	}
 
 	
@@ -266,6 +228,7 @@ public struct GrapherParams
 	public double dBgLow;
 	public double dBgHigh;
 	public bool fLandscape;
+	public bool fGraphAvg;
 }
 
 //  ______  ______ _______  _____  _     _ _____ _______   ______   _____  _     _
@@ -287,1650 +250,8 @@ public interface GraphicBox
 	DateTime GetFirstDateTime();
 	void SetFirstDateTime(DateTime dttm);
 	bool FGetLastDateTimeOnPage(out DateTime dttm);
-
 }
 
-//	 ______ _______  _____   _____   ______ _______ _______  ______
-//	|_____/ |______ |_____] |     | |_____/    |    |______ |_____/
-//	|    \_ |______ |       |_____| |    \_    |    |______ |    \_
-
-public class Reporter : GraphicBox
-{
-	//  _  _ ____ _  _ ___  ____ ____     _  _ ____ ____ _ ____ ___  _    ____ ____
-	//  |\/| |___ |\/| |__] |___ |__/     |  | |__| |__/ | |__| |__] |    |___ [__
-	//  |  | |___ |  | |__] |___ |  \      \/  |  | |  \ | |  | |__] |___ |___ ___]
-
-	float m_nHeight;
-	float m_nWidth;
-	SortedList m_slbge;
-	GrapherParams m_cgp;
-	double m_dHoursBefore = 2.0;
-	double m_dHoursAfter = 1.5;
-	RectangleF m_rcfDrawing;
-	bool m_fColor = true;
-
-	COLD []m_mpicold;
-	float []m_mpicolDxp;
-
-	const int icolDay = 0;
-	const int icolMealBreakfast = 1;
-	const int icolMealLunch = 4;
-	const int icolMealDinner = 7;
-	const int icolBed = 10;
-	const int icolComments = 11;
-
-	const int iMealBreakfast = 0;
-	const int iMealLunch = 1;
-	const int iMealDinner = 2;
-
-	struct PTB // PaintBox
-	{
-		public Font fontText;
-		public SolidBrush brushText;
-		public SolidBrush brushHeavy;
-		public SolidBrush brushLight;
-		public SolidBrush brushLightFill;
-		public SolidBrush brushBorderFill;
-		public Pen penHeavy;
-		public Pen penLight;
-	}
-
-	struct MD // MealData
-	{
-		public int nBefore;
-		public int nAfter;
-		public int nCarbs;
-	};
-
-	PTB m_ptb;
-
-	//	____ _    ___
-	//	|__/ |    |  \
-	//	|  \ |___ |__/
-
-	class RLD	// ReportLineData
-	{
-		public string sDay;
-		public int nBedReading;
-		public string sComment;
-		public string sDateHeader;
-		public DateTime dttm;
-		public MD []mpimd;
-
-		/* R  L  D */
-		/*----------------------------------------------------------------------------
-			%%Function: RLD
-			%%Qualified: bg.Reporter:RLD.RLD
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		public RLD()
-		{
-			sDay = "";
-			nBedReading = 0;
-			sComment = "";
-			sDateHeader = "";
-			mpimd = new MD[3];
-			mpimd[0].nBefore = mpimd[0].nAfter = mpimd[0].nCarbs;
-			mpimd[1].nBefore = mpimd[1].nAfter = mpimd[1].nCarbs;
-			mpimd[2].nBefore = mpimd[2].nAfter = mpimd[2].nCarbs;
-		}
-
-	};
-
-	public enum BorderType
-	{
-		None,
-		Solid,
-		Double
-	};
-
-	//	____ ____ _    ___
-	//	|    |  | |    |  \
-	//	|___ |__| |___ |__/
-
-	public class COLD	// COLumn Definition
-	{
-		public float xpLeft;
-		public float dxpCol;
-		public BorderType btLeft;
-		public BorderType btRight;
-
-		/* C  O  L  D */
-		/*----------------------------------------------------------------------------
-			%%Function: COLD
-			%%Qualified: bg.Reporter:COLD.COLD
-			%%Contact: rlittle
-
-			
-		----------------------------------------------------------------------------*/
-		public COLD(COLD coldPrev, float dxpLeftSpace, float dxpColIn, BorderType btLeftIn, BorderType btRightIn)
-		{
-			float xpPrev = 0;
-			if (coldPrev != null)
-				{
-				xpPrev = coldPrev.xpLeft + coldPrev.dxpCol;
-				}
-			xpLeft = xpPrev + dxpLeftSpace;
-			dxpCol = dxpColIn;
-			btLeft = btLeftIn;
-			btRight = btRightIn;
-		}
-
-		/* D X P  R I G H T */
-		/*----------------------------------------------------------------------------
-			%%Function: dxpRight
-			%%Qualified: bg.Reporter:COLD.dxpRight
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		public float dxpRight
-		{
-			get
-			{
-				return xpLeft + dxpCol;
-			}
-		}
-
-		/* R C F  F R O M  C O L U M N */
-		/*----------------------------------------------------------------------------
-			%%Function: RcfFromColumn
-			%%Qualified: bg.Reporter:COLD.RcfFromColumn
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		public RectangleF RcfFromColumn(float yp, float dyp)
-		{
-			return new RectangleF(xpLeft, yp, this.dxpRight - xpLeft, dyp);
-		}
-
-		/* D R A W  S I N G L E  B O R D E R */
-		/*----------------------------------------------------------------------------
-			%%Function: DrawSingleBorder
-			%%Qualified: bg.Reporter:COLD.DrawSingleBorder
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		void DrawSingleBorder(Graphics gr, Brush brushFill, Pen pen, float xp, float yp, float dyp, BorderType bt)
-		{
-			switch (bt)
-				{
-				case BorderType.Solid:
-					{
-					float dxpAdjustForWidth = pen.Width / 2.0F;
-
-					xp -= dxpAdjustForWidth;
-					gr.DrawLine(pen, xp, yp, xp, yp + dyp);
-					break;
-					}
-				case BorderType.Double:
-					{
-					float penWidth = (float)pen.Width;
-					float dxpAdjustForWidth = (penWidth * 3.0F) / 2.0F;
-
-					xp -= dxpAdjustForWidth;
-					// clear the region for the border
-					gr.FillRectangle(brushFill, xp + penWidth / 2.0F, yp, penWidth * 1.5F, dyp);
-
-					gr.DrawLine(pen, xp, yp, xp, yp + dyp);
-
-					gr.DrawLine(pen, xp + penWidth * 2.0F, yp, xp + penWidth * 2.0F, yp + dyp);
-					break;
-					}
-				}
-		}
-
-		/* D R A W  B O R D E R S */
-		/*----------------------------------------------------------------------------
-			%%Function: DrawBorders
-			%%Qualified: bg.Reporter:COLD.DrawBorders
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		public void DrawBorders(Graphics gr, float ypTop, float dyp, Pen pen, Brush brushFill)
-		{
-			DrawSingleBorder(gr, brushFill, pen, this.xpLeft, ypTop, dyp, this.btLeft);
-			DrawSingleBorder(gr, brushFill, pen, this.xpLeft, ypTop, dyp, this.btRight);
-		}
-	}
-
-
-	/* S E T  C O L O R */
-	/*----------------------------------------------------------------------------
-		%%Function: SetColor
-		%%Qualified: bg.Reporter.SetColor
-		%%Contact: rlittle
-		
-	----------------------------------------------------------------------------*/
-	public void SetColor(bool fColor)
-	{
-		m_fColor = fColor;
-	}
-
-	/* S E T  F I R S T  F R O M  S C R O L L */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstFromScroll
-		%%Qualified: bg.Reporter:COLD.SetFirstFromScroll
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstFromScroll(int i)
-	{
-		SetFirstLine(i);
-	}
-
-	/* D X P  F R O M  D X A */
-	/*----------------------------------------------------------------------------
-		%%Function: DxpFromDxa
-		%%Qualified: bg.Reporter.DxpFromDxa
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	static public float DxpFromDxa(Graphics gr, float dxa)
-	{
-		return (float)(((double)dxa * gr.DpiX) / 1440.0);
-	}
-
-	static public float DxpFromDxaPrint(Graphics gr, float dxa)
-	{
-		return (float)(((double)dxa * 100.0) / 1440.0);
-	}
-
-	/* D Y P  F R O M  D Y A */
-	/*----------------------------------------------------------------------------
-		%%Function: DypFromDya
-		%%Qualified: bg.Reporter.DypFromDya
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	static public float DypFromDya(Graphics gr, float dya)
-	{
-		return (float)(((double)dya * gr.DpiY) / 1440.0);
-	}
-
-	static public float DypFromDyaPrint(Graphics gr, float dya)
-	{
-		return (float)(((double)dya * 100.0) / 1440.0);
-	}
-
-	/* S E T  F I R S T  L I N E */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstLine
-		%%Qualified: bg.Reporter.SetFirstLine
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstLine(int iLine)
-	{
-		m_iLineFirst = iLine;
-	}
-
-	/* G E T  F I R S T  L I N E */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstLine
-		%%Qualified: bg.Reporter.GetFirstLine
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public int GetFirstLine()
-	{
-		return m_iLineFirst;
-	}
-
-	/* G E T  F I R S T  F O R  S C R O L L */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstForScroll
-		%%Qualified: bg.Reporter.GetFirstForScroll
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public int GetFirstForScroll()
-	{
-		return m_iLineFirst;
-	}
-
-	/* G E T  F I R S T  D A T E  T I M E */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstDateTime
-		%%Qualified: bg.Reporter.GetFirstDateTime
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public DateTime GetFirstDateTime()
-	{
-		return ((RLD)m_plrld[m_iLineFirst]).dttm;
-	}
-
-	/* S E T  F I R S T  D A T E  T I M E */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstDateTime
-		%%Qualified: bg.Reporter.SetFirstDateTime
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstDateTime(DateTime dttm)
-	{
-		// try to normalize around dttm
-		int i, iMax;
-
-		for (i = 0, iMax = m_plrld.Count; i < iMax; i++)
-			{
-			if (dttm <= ((RLD)m_plrld[i]).dttm)
-				break;
-			}
-
-		if (i < iMax)
-			m_iLineFirst = i;
-	}
-
-
-
-	/* S E T  C O L  W I D T H */
-	/*----------------------------------------------------------------------------
-		%%Function: SetColWidth
-		%%Qualified: bg.Reporter.SetColWidth
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	void SetColWidth(int iCol, int nPercent, BorderType btLeft, BorderType btRight)
-	{
-		float dPercent = (m_nWidth * (float)nPercent) / 100.0F;
-
-		if (iCol > 0)
-			{
-			if (dPercent == 0)
-				{
-				dPercent = m_rcfDrawing.Right - m_mpicold[iCol - 1].dxpRight;
-				}
-
-			float dxpSpace = 0.0F;
-
-			if (m_mpicold[iCol - 1].btRight != BorderType.None)
-				{
-				dxpSpace = 2.0F;
-				}
-
-			m_mpicold[iCol] = new COLD(m_mpicold[iCol - 1], dxpSpace, dPercent, btLeft, btRight);
-			}
-		else
-			{
-			m_mpicold[iCol] = new COLD(null, m_rcfDrawing.Left, dPercent, btLeft, btRight);
-			}
-	}
-
-	/* R E P O R T E R */
-	/*----------------------------------------------------------------------------
-		%%Function: Reporter
-		%%Qualified: bg.Reporter.Reporter
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public Reporter(RectangleF rcfDrawing, Graphics gr)	// int nWidth, int nHeight, 
-	{
-		// draw the first line
-		m_ptb.fontText = new Font("Tahoma", 9);
-		m_ptb.brushText = new SolidBrush(Color.Black);
-		m_ptb.brushHeavy = new SolidBrush(Color.Blue);
-		m_ptb.brushLight = new SolidBrush(Color.LightBlue);
-		m_ptb.penHeavy = new Pen(m_ptb.brushHeavy, 1.0F);
-		m_ptb.penLight = new Pen(m_ptb.brushLight, 0.5F);
-		m_ptb.brushLightFill = new SolidBrush(Color.LightGray);
-		m_ptb.brushBorderFill = new SolidBrush(Color.White);
-
-		m_dyLine = gr.MeasureString("M", m_ptb.fontText).Height;
-		m_mpicold = new COLD[13];
-
-		m_rcfDrawing = rcfDrawing;
-		m_nHeight = rcfDrawing.Height; // nHeight;
-		m_nWidth = rcfDrawing.Width; // nWidth;
-		m_cgp.dBgLow = 30.0;
-		m_cgp.dBgHigh = 220.0;
-		m_cgp.nDays = 7;
-		m_cgp.nIntervals = 19;
-		m_cgp.fShowMeals = false;
-
-		float dy = YFromLine(2) - YFromLine(1);
-
-
-		m_nLinesPerPage = (int)(m_nHeight / dy) - 1 ;
-
-		Font font = new Font("Tahoma", 8);
-
-		SetColWidth(icolDay, 5, BorderType.Solid, BorderType.None);
-
-		SetColWidth(icolMealBreakfast, 4, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealBreakfast + 1, 3, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealBreakfast + 2, 4, BorderType.Solid, BorderType.None);
-
-		SetColWidth(icolMealLunch, 4, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealLunch + 1, 3, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealLunch + 2, 4, BorderType.Solid, BorderType.None);
-
-		SetColWidth(icolMealDinner, 4, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealDinner + 1, 3, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealDinner + 2, 4, BorderType.Solid, BorderType.None);
-
-		SetColWidth(icolBed, 4, BorderType.Double, BorderType.None);
-
-		SetColWidth(icolComments, 0, BorderType.Double, BorderType.None);
-	}
-
-	//	___  ____ _ _  _ ___ _ _  _ ____
-	//	|__] |__| | |\ |  |  | |\ | | __
-	//	|    |  | | | \|  |  | | \| |__]
-
-	/* P A I N T  G R I D L I N E S */
-	/*----------------------------------------------------------------------------
-		%%Function: PaintGridlines
-		%%Qualified: bg.Reporter.PaintGridlines
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void PaintGridlines(Graphics gr)
-	{
-
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealBreakfast].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealBreakfast + 2].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealLunch].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealLunch + 2].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealDinner].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolMealDinner + 2].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-
-		gr.FillRectangle(m_ptb.brushLightFill, m_mpicold[icolBed].RcfFromColumn(m_dyLine + m_rcfDrawing.Top, m_nHeight - m_dyLine));
-
-		gr.DrawRectangle(m_ptb.penHeavy, m_mpicold[0].xpLeft, m_rcfDrawing.Top, m_nWidth, m_nHeight);
-
-		// draw the column borders
-		m_mpicold[icolMealBreakfast].DrawBorders(gr, m_rcfDrawing.Top, m_nHeight, m_ptb.penHeavy, m_ptb.brushBorderFill);
-		m_mpicold[icolMealBreakfast + 1].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-		m_mpicold[icolMealBreakfast + 2].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-
-		m_mpicold[icolMealLunch].DrawBorders(gr, m_rcfDrawing.Top, m_nHeight, m_ptb.penHeavy, m_ptb.brushBorderFill);
-		m_mpicold[icolMealLunch + 1].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-		m_mpicold[icolMealLunch + 2].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-
-		m_mpicold[icolMealDinner].DrawBorders(gr, m_rcfDrawing.Top, m_nHeight, m_ptb.penHeavy, m_ptb.brushBorderFill);
-		m_mpicold[icolMealDinner + 1].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-		m_mpicold[icolMealDinner + 2].DrawBorders(gr, m_rcfDrawing.Top + m_dyLine, m_nHeight - m_dyLine, m_ptb.penLight, m_ptb.brushBorderFill);
-
-		m_mpicold[icolBed].DrawBorders(gr, m_rcfDrawing.Top, m_nHeight, m_ptb.penHeavy, m_ptb.brushBorderFill);
-		m_mpicold[icolComments].DrawBorders(gr, m_rcfDrawing.Top, m_nHeight, m_ptb.penHeavy, m_ptb.brushBorderFill);
-
-		gr.DrawLine(m_ptb.penHeavy, m_mpicold[0].xpLeft, m_dyLine + m_rcfDrawing.Top, m_nWidth + m_mpicold[0].xpLeft, m_dyLine + m_rcfDrawing.Top);
-
-	}
-
-	/* P A I N T  H E A D E R */
-	/*----------------------------------------------------------------------------
-		%%Function: PaintHeader
-		%%Qualified: bg.Reporter.PaintHeader
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void PaintHeader(Graphics gr)
-	{
-		float y = YFromLine(0);
-
-		DrawTextInColumn(gr, "day", m_ptb.fontText, m_ptb.brushText, 0, y, 1, HorizontalAlignment.Left);
-		DrawTextInColumn(gr, "Breakfast", m_ptb.fontText, m_ptb.brushText, icolMealBreakfast, y, 3, HorizontalAlignment.Center);
-		DrawTextInColumn(gr, "Lunch", m_ptb.fontText, m_ptb.brushText, icolMealLunch, y, 3, HorizontalAlignment.Center);
-		DrawTextInColumn(gr, "Dinner", m_ptb.fontText, m_ptb.brushText, icolMealDinner, y, 3, HorizontalAlignment.Center);
-		DrawTextInColumn(gr, "Bed", m_ptb.fontText, m_ptb.brushText, icolBed, y, 1, HorizontalAlignment.Center);
-		DrawTextInColumn(gr, "Comments", m_ptb.fontText, m_ptb.brushText, icolComments, y, 1, HorizontalAlignment.Left);
-	}
-
-	/* P A I N T  L I N E */
-	/*----------------------------------------------------------------------------
-		%%Function: PaintLine
-		%%Qualified: bg.Reporter.PaintLine
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	void PaintLine(Graphics gr, RLD rld, int iLine)
-	{
-		int iMeal;
-
-		DrawTextInColumn(gr, rld.sDay, m_ptb.fontText, m_ptb.brushText, 0, YFromLine(iLine), 1, HorizontalAlignment.Center);
-
-		for (iMeal = 0; iMeal <= iMealDinner; iMeal++)
-			{
-			if (rld.mpimd[iMeal].nBefore > 0)
-				DrawTextInColumn(gr, rld.mpimd[iMeal].nBefore.ToString(), m_ptb.fontText, m_ptb.brushText, 1 + iMeal * 3, YFromLine(iLine), 1, HorizontalAlignment.Right);
-			if (rld.mpimd[iMeal].nCarbs > 0)
-				DrawTextInColumn(gr, rld.mpimd[iMeal].nCarbs.ToString(), m_ptb.fontText, m_ptb.brushText, 2 + iMeal * 3, YFromLine(iLine), 1, HorizontalAlignment.Center);
-			if (rld.mpimd[iMeal].nAfter > 0)
-				DrawTextInColumn(gr, rld.mpimd[iMeal].nAfter.ToString(), m_ptb.fontText, m_ptb.brushText, 3 + iMeal * 3, YFromLine(iLine), 1, HorizontalAlignment.Right);
-			}
-
-		DrawTextInColumn(gr, rld.nBedReading.ToString(), m_ptb.fontText, m_ptb.brushText, icolBed, YFromLine(iLine), 1, HorizontalAlignment.Right);
-		DrawTextInColumn(gr, /*rld.sDateHeader + "] " + */rld.sComment, m_ptb.fontText, m_ptb.brushText, icolComments, YFromLine(iLine), 1, HorizontalAlignment.Left);
-	}
-
-	int m_nLines;
-	int m_iLineFirst;
-	int m_nLinesPerPage;
-	/* S E T  D A T A  P O I N T S */
-	/*----------------------------------------------------------------------------
-		%%Function: SetDataPoints
-		%%Qualified: bg.Reporter.SetDataPoints
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
-	{
-		m_slbge = slbge;
-
-		// figure out how many lines we're going to have...
-		// get the first entry and the last
-		DateTime dttmFirst = ((BGE)m_slbge.GetByIndex(0)).Date;
-		DateTime dttmLast = ((BGE)m_slbge.GetByIndex(m_slbge.Count - 1)).Date;
-
-		dttmLast = dttmLast.AddMinutes(-241.0);	// subtract just over 4 hours to account for the fact that our day turns at 4am...  
-		TimeSpan ts = dttmLast.Subtract(dttmFirst);
-		// the number of days is the number of lines.
-		m_nLines = ts.Days + 1;
-		m_iLineFirst = 0;
-		if (sbv != null)
-			{
-			if (m_nLines <= m_nLinesPerPage)
-				sbv.Visible = false;
-			else
-				{
-				sbv.Visible = true;
-				sbv.Minimum = 0;
-				sbv.Maximum = m_nLines + m_nLinesPerPage;
-				}
-			}
-	}
-
-	/* S E T  P R O P S */
-	/*----------------------------------------------------------------------------
-		%%Function: SetProps
-		%%Qualified: bg.Reporter.SetProps
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetProps(GrapherParams cgp)
-	{
-		m_cgp = cgp;
-	}
-
-	float m_dyLine = 0.0F;
-
-	/* Y  F R O M  L I N E */
-	/*----------------------------------------------------------------------------
-		%%Function: YFromLine
-		%%Qualified: bg.Reporter.YFromLine
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public float YFromLine(int nLine)
-	{
-		return (float)m_dyLine * nLine + m_rcfDrawing.Top;
-	}
-
-	/* D R A W  T E X T  I N  C O L U M N */
-	/*----------------------------------------------------------------------------
-		%%Function: DrawTextInColumn
-		%%Qualified: bg.Reporter.DrawTextInColumn
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void DrawTextInColumn(Graphics gr, string s, Font font, SolidBrush br, int iCol, float y, int cColSpan, HorizontalAlignment jc)
-	{
-		int iColMax = iCol + cColSpan - 1;
-		COLD cold = m_mpicold[iCol];
-		float dxpRight = m_mpicold[iColMax].dxpRight;
-		float dxpWidth = 0.0F;
-
-		if (cColSpan == 1)
-			dxpWidth = cold.dxpCol;
-		else
-			dxpWidth = dxpRight - cold.xpLeft;
-
-		RectangleF rectfClip = new RectangleF(cold.xpLeft, y, dxpWidth, y + 20);
-		gr.SetClip(rectfClip);
-
-		switch (jc)
-			{
-			case HorizontalAlignment.Left:
-				gr.DrawString(s, font, br, cold.xpLeft, y);
-				break;
-			case HorizontalAlignment.Center:
-				gr.DrawString(s, font, br, cold.xpLeft + (dxpWidth - gr.MeasureString(s, font).Width) / 2, y);
-				break;
-			case HorizontalAlignment.Right:
-				gr.DrawString(s, font, br, cold.xpLeft + (dxpWidth - gr.MeasureString(s, font).Width), y);
-				break;
-			}
-		gr.ResetClip();
-	}
-
-	ArrayList m_plrld;
-
-	/* C A L C  R E P O R T */
-	/*----------------------------------------------------------------------------
-		%%Function: CalcReport
-		%%Qualified: bg.Reporter.CalcReport
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void Calc()
-	{
-		m_plrld = new ArrayList();
-
-		// ok, let's walk through and figure out what gets reported and what doesn't
-		//
-		// first, draw the date we are working with.
-		BGE bge = (BGE)m_slbge.GetByIndex(0);
-		DateTime dttmFirst = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
-
-		int ibge, ibgeMax;
-
-		ibge = 0;
-		ibgeMax = m_slbge.Values.Count;
-		RLD rld = new RLD();
-
-		while (ibge < ibgeMax)
-			{
-			float []dMeals = { 8.0F, 12.0F, 18.0F };	// our defaults for meals
-			float dHours = 0.0F;
-			string []rgsDay = { "S", "M", "T", "W", "T", "F", "S" };
-			bool []rgfMeals = { false, false, false };
-
-
-			bge = (BGE)m_slbge.GetByIndex(ibge);
-
-			DateTime dttm = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
-			DateTime dttmNextDay = dttm.AddHours(29.5);// next day is 4:30am the next day
-			int ibgeT = ibge;
-			rld.dttm = dttm;
-			rld.sDay = rgsDay[(int)dttm.DayOfWeek];
-			if (dttm.DayOfWeek == DayOfWeek.Sunday)
-				{
-				rld.sDay = dttm.ToString("M-dd");
-				rld.sDateHeader = dttm.ToString("d");
-				}
-
-			// let's see what meals we have manually accounted for...
-			while (bge.Date < dttmNextDay)
-				{
-				dHours = bge.Date.Hour + bge.Date.Minute / 60.0F;
-
-				if (bge.Type == BGE.ReadingType.Breakfast)
-					{
-					dMeals[0] = dHours;
-					rgfMeals[0] = true;
-					}
-				else if (bge.Type == BGE.ReadingType.Lunch)
-					{
-					dMeals[1] = dHours;
-					rgfMeals[1] = true;
-					}
-				else if (bge.Type == BGE.ReadingType.Dinner)
-					{
-					dMeals[2] = dHours;
-					rgfMeals[2] = true;
-					}
-
-				if (ibgeT + 1 >= ibgeMax)
-					break;
-
-				bge = (BGE)m_slbge.GetByIndex(++ibgeT);
-				}
-
-			// ok, we have figured out the meal boundaries.  now lets match the readings...
-			// any reading within 1 hour of the meal time is considered a "before", and the first reading
-			// between 2 hours and 3 hours after meal time is considered "after"
-			bge = (BGE)m_slbge.GetByIndex(ibgeT = ibge);
-			int iMealNext = 0;
-			bool fBeforeMatched = false;
-			int readingBefore = 0;
-			int readingBed = 0;
-			int readingFirst = 0; // the first reading of the day will serve as the "pre-breakfast" unless we get a better reading.
-			float dBedMin = dMeals[iMealDinner] + 2.0F;
-			bool fMealBumped = false;
-
-			while (bge.Date < dttmNextDay)	
-				{
-				dHours = bge.Date.Hour + bge.Date.Minute / 60.0F;
-
-				// don't duplicate comments...
-				if (!fMealBumped && bge.Comment.Length > 0)
-					{
-					if (rld.sComment.Length > 0)
-						rld.sComment += "; ";
-
-					rld.sComment += bge.Comment;
-					}
-
-				fMealBumped = false;
-				if (bge.Date.Day == dttmNextDay.Day)
-					dHours += 24.0F;
-
-				if (readingFirst == 0 && dHours <= dMeals[iMealBreakfast])
-					readingFirst = bge.Reading;
-
-				if (iMealNext <= iMealDinner)
-					{
-					// are we looking for a 'before' reading?
-
-					if ((iMealNext == iMealBreakfast && bge.Type == BGE.ReadingType.Breakfast)
-						|| (iMealNext == iMealLunch && bge.Type == BGE.ReadingType.Lunch)
-						|| (iMealNext == iMealDinner && bge.Type == BGE.ReadingType.Dinner))
-						{
-						rld.mpimd[iMealNext].nCarbs = bge.Carbs;
-						}
-
-					if (!fBeforeMatched
-						&& bge.Reading != 0
-						&& dHours >= dMeals[iMealNext] - m_dHoursBefore && dHours <= dMeals[iMealNext])
-						{
-						// got a "before" match
-						readingBefore = bge.Reading;
-						}
-
-					// did we find a "before" reading for the current meal and are looking
-					// for that meal (or a reading post-meal) to confirm that this is the last
-					// "before" reading?
-
-					if (readingBefore != 0 && !fBeforeMatched && dHours > dMeals[iMealNext])
-						{
-						rld.mpimd[iMealNext].nBefore = readingBefore;
-						fBeforeMatched = true;
-						}
-
-					// does this reading qualify as an 'after' reading?
-					if (dHours >= dMeals[iMealNext] + m_dHoursAfter && dHours <= dMeals[iMealNext] + 4.0)
-						{
-						// got an "after" match
-						rld.mpimd[iMealNext].nAfter = bge.Reading;
-						iMealNext++;
-						fBeforeMatched = false;
-						if (readingBefore != 0)
-							readingFirst = 0;
-						readingBefore = 0;
-						fMealBumped = true;
-						}
-
-					if (!fMealBumped)
-						{
-						// check to see if we are ready to bump to the next meal
-						if (dHours > dMeals[iMealNext] + 4.0)
-							{
-							iMealNext++;
-							fBeforeMatched = false;
-							if (readingBefore != 0)
-								readingFirst = 0;
-							readingBefore = 0;
-							fMealBumped = true;
-							}
-						}
-
-					if (fMealBumped && iMealNext == iMealLunch)
-						{
-						if (readingFirst != 0)
-							{
-							// we still have a "first reading" which means that the breakfast
-							// meal never posted a before reading.  use that first reading now.
-							rld.mpimd[iMealBreakfast].nBefore = readingFirst;
-							readingFirst = 0;
-							}
-						}
-
-					if (!fMealBumped && ibgeT + 1 >= ibgeMax)
-						{
-						break;
-						}
-
-					}
-
-				if (dHours >= dBedMin)
-					readingBed = bge.Reading;
-
-				// if we bumped the meal, then go through again considering this reading
-				// for the next meal.
-				if (!fMealBumped)
-					{
-					if (ibgeT + 1 >= ibgeMax)
-						break;
-					bge = (BGE)m_slbge.GetByIndex(++ibgeT);
-					}
-				}
-			// need to flush everything here
-			if (!fBeforeMatched && readingBefore != 0)
-				{
-				rld.mpimd[iMealNext].nBefore = readingBefore;
-				}
-			if (!fBeforeMatched && iMealNext == iMealBreakfast && readingFirst != 0)
-				{
-				rld.mpimd[iMealNext].nBefore = readingFirst;
-				}
-
-			rld.nBedReading = readingBed;
-			m_plrld.Add(rld);
-			rld = new RLD();
-
-			// consume the rest of the day
-			ibge = ibgeT;
-			bge = (BGE)m_slbge.GetByIndex(ibge);
-			while (bge.Date < dttmNextDay)
-				{
-				ibge++;
-				if (ibge >= ibgeMax)
-					break;
-
-				bge = (BGE)m_slbge.GetByIndex(ibge);
-				}
-			}
-		// at this point, we have all the data we'll ever want...
-
-	}
-
-
-	public int GetDaysPerPage()
-	{
-		return m_nLinesPerPage;
-	}
-
-	public void SetDaysPerPage(int nDaysPerPage)
-	{
-		throw new Exception("Cannot set days per page in a report!");
-	}
-
-	/* P A I N T */
-	/*----------------------------------------------------------------------------
-		%%Function: Paint
-		%%Qualified: bg.Reporter.Paint
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void Paint(Graphics gr)
-	{
-
-		PaintHeader(gr);
-		PaintGridlines(gr);
-
-		int iLine, iLineMax;
-		int iLinePainting = 1;
-
-		for (iLine = m_iLineFirst, iLineMax = Math.Min(m_iLineFirst + m_nLinesPerPage, m_nLines); iLine < iLineMax; iLine++)
-			{
-			PaintLine(gr, (RLD)m_plrld[iLine], iLinePainting++);
-			}
-	}
-
-	public bool FGetLastDateTimeOnPage(out DateTime dttm)
-	{
-		dttm = GetFirstDateTime();
-		if (m_iLineFirst + m_nLinesPerPage > m_nLines)
-			{
-			return false;
-			}
-
-		dttm = dttm.AddDays(m_nLinesPerPage);
-		return true;
-	}
-
-	/* F  H I T  T E S T */
-	/*----------------------------------------------------------------------------
-		%%Function: FHitTest
-		%%Qualified: bg.Reporter.FHitTest
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public bool FHitTest(Point pt, out object oHit, out RectangleF rectfHit)
-	{
-		oHit = null;
-		rectfHit = new RectangleF(0F,0F,0F,0F);
-		return false;
-	}
-
-}
-
-//  ______  ______ _______  _____  _     _ _______  ______
-// |  ____ |_____/ |_____| |_____] |_____| |______ |_____/
-// |_____| |    \_ |     | |       |     | |______ |    \_
-
-public class Grapher : GraphicBox
-{
-//  _  _ ____ _  _ ___  ____ ____     _  _ ____ ____ _ ____ ___  _    ____ ____
-//	|\/| |___ |\/| |__] |___ |__/     |  | |__| |__/ | |__| |__] |    |___ [__
-//	|  | |___ |  | |__] |___ |  \      \/  |  | |  \ | |  | |__] |___ |___ ___]
-
-	float m_nHeight;
-	float m_nWidth;
-	RectangleF m_rcfDrawing;
-	SortedList m_slbge;
-	GrapherParams m_cgp;
-	double m_dyPerBgUnit;
-	double m_dxQuarter;
-	int m_iFirstQuarter;
-	float m_dxAdjust = 0;
-	bool m_fColor = true;
-
-	ArrayList m_plptfi;
-
-	float m_dxOffset = 30.0F;
-	float m_dyOffset = 45.0F;
-
-	HScrollBar m_sbh;
-
-	/* G R A P H E R */
-	/*----------------------------------------------------------------------------
-		%%Function: Grapher
-		%%Qualified: bg.Grapher.Grapher
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public Grapher(RectangleF rcf, Graphics gr) // int nWidth, int nHeight
-	{
-		m_rcfDrawing = rcf;
-		m_nHeight = rcf.Bottom - rcf.Top; // nHeight;
-		m_nWidth = rcf.Right - rcf.Left; // nWidth;
-		m_cgp.dBgLow = 30.0;
-		m_cgp.dBgHigh = 220.0;
-		m_cgp.nDays = 7;
-		m_cgp.nIntervals = 19;
-		m_cgp.fShowMeals = false;
-		Font font = new Font("Tahoma", 8);
-
-		m_dxOffset = gr.MeasureString("0000", font).Width;
-		m_dyOffset = gr.MeasureString("0\n0\n0\n0\n", font).Height;
-	}
-
-	public int GetDaysPerPage()
-	{
-		return m_cgp.nDays;
-	}
-
-	public void SetDaysPerPage(int nDaysPerPage)
-	{
-		m_cgp.nDays = nDaysPerPage;
-	}
-
-	/* S E T  F I R S T  F R O M  S C R O L L */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstFromScroll
-		%%Qualified: bg.Grapher.SetFirstFromScroll
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstFromScroll(int i)
-	{
-		SetFirstQuarter(i);
-	}
-
-	/* S E T  F I R S T  Q U A R T E R */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstQuarter
-		%%Qualified: bg.Grapher.SetFirstQuarter
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstQuarter(int i)
-	{
-		m_iFirstQuarter = i;
-	}
-
-	/* G E T  F I R S T  Q U A R T E R */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstQuarter
-		%%Qualified: bg.Grapher.GetFirstQuarter
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public int GetFirstQuarter()
-	{
-		return m_iFirstQuarter;
-	}
-
-	/* S E T  C O L O R */
-	/*----------------------------------------------------------------------------
-		%%Function: SetColor
-		%%Qualified: bg.Grapher.SetColor
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetColor(bool fColor)
-	{
-		m_fColor = fColor;
-	}
-
-	/* G E T  F I R S T  F O R  S C R O L L */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstForScroll
-		%%Qualified: bg.Grapher.GetFirstForScroll
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public int GetFirstForScroll()
-	{
-		return GetFirstQuarter();
-	}
-
-	/* G E T  F I R S T  D A T E  T I M E */
-	/*----------------------------------------------------------------------------
-		%%Function: GetFirstDateTime
-		%%Qualified: bg.Grapher.GetFirstDateTime
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public DateTime GetFirstDateTime()
-	{
-		PTFI ptfi = (PTFI)m_plptfi[0];
-		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
-		DateTime dttm = DateTime.Parse(dttmFirst.ToString("d"));
-		double nDayFirst = ((double)m_iFirstQuarter + 95.0) / (4.0 * 24.0) - 1.0;
-		dttm = dttm.AddDays(nDayFirst);
-
-		return dttm;
-	}
-
-	/* S E T  F I R S T  D A T E  T I M E */
-	/*----------------------------------------------------------------------------
-		%%Function: SetFirstDateTime
-		%%Qualified: bg.Grapher.SetFirstDateTime
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetFirstDateTime(DateTime dttm)
-	{
-		PTFI ptfi = (PTFI)m_plptfi[0];
-		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
-		TimeSpan ts = dttm.Subtract(dttmFirst);
-		m_iFirstQuarter = (int)(4.0 * ts.TotalHours) + 1;
-	}
-
-
-	/* P T F  F R O M  B G E */
-	/*----------------------------------------------------------------------------
-		%%Function: PtfFromBge
-		%%Qualified: bg.Grapher.PtfFromBge
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	PointF PtfFromBge(DateTime dayFirst, BGE bge, double dxQuarter, double dyBg)
-	{
-		float x = XFromDate(dayFirst, bge.Date, dxQuarter);
-		float y = YFromReading(bge.Reading, dyBg);
-
-		// now we've got the number of quarters.  figure out the bge
-		return new PointF(x,y);
-	}
-
-	/* S E T  D A T A  P O I N T S */
-	/*----------------------------------------------------------------------------
-		%%Function: SetDataPoints
-		%%Qualified: bg.Grapher.SetDataPoints
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
-	{
-		m_slbge = slbge;
-		m_sbh = sbh;
-	}
-
-	/* S E T  P R O P S */
-	/*----------------------------------------------------------------------------
-		%%Function: SetProps
-		%%Qualified: bg.Grapher.SetProps
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void SetProps(GrapherParams cgp)
-	{
-		m_cgp = cgp;
-	}
-
-	/* Y  F R O M  R E A D I N G */
-	/*----------------------------------------------------------------------------
-		%%Function: YFromReading
-		%%Qualified: bg.Grapher.YFromReading
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public float YFromReading(int nReading, double dyPerBgUnit)
-	{
-		if (nReading == 0)
-			return -1.0F;
-
-		return m_rcfDrawing.Top + m_nHeight - ((((float)nReading - (float)m_cgp.dBgLow) * (float)dyPerBgUnit)) - m_dyOffset;
-	}
-
-	/* X  F R O M  D A T E */
-	/*----------------------------------------------------------------------------
-		%%Function: XFromDate
-		%%Qualified: bg.Grapher.XFromDate
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public float XFromDate(DateTime dayFirst, DateTime dttm, double dxQuarter)
-	{
-		// calculate how many quarter hours
-		long ticks = dttm.Ticks - dayFirst.Ticks;
-		long lQuarters = ticks / (36000000000 / 4);
-
-		return (float)((lQuarters * dxQuarter) + m_rcfDrawing.Left); // (m_dxOffset + m_dxLeftMargin));
-	}
-
-	/* C A L C */
-	/*----------------------------------------------------------------------------
-		%%Function: Calc
-		%%Qualified: bg.Grapher.Calc
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void Calc()
-	{
-		// graph the points in the dataset, m_cgp.nDays at a time
-		BGE bge = (BGE)m_slbge.GetByIndex(0);
-		DateTime dayFirst = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
-   
-		// split apart the graphing range into intervals, by the quarter hour
-
-		double cxQuarters = m_cgp.nDays * 24 * 4;
-		double dxQuarter = (m_nWidth - m_dxOffset / 2) / cxQuarters; // (m_nWidth - (m_dxOffset + m_dxLeftMargin + m_dxRightMargin) - m_dxOffset / 2) / cxQuarters;
-
-		double cyBg = m_cgp.dBgHigh - m_cgp.dBgLow;
-		double dyBg = (m_nHeight - m_dyOffset) / cyBg;// (m_nHeight - (m_dyOffset + m_dyTopMargin + m_dyBottomMargin)) / cyBg;
-
-		// build up a set of points to graph
-		int iValue = 0;
-		m_plptfi = new ArrayList();
-
-		float dxMax = 0;
-
-		while (iValue < m_slbge.Values.Count)
-			{
-			bge = (BGE)m_slbge.GetByIndex(iValue);
-
-			// set a point at bge
-			
-			PointF ptf = PtfFromBge(dayFirst, bge, dxQuarter, dyBg);
-			if (ptf.X > dxMax)
-				dxMax = ptf.X;
-
-			PTFI ptfi;
-
-			ptfi.ptf = ptf;
-			ptfi.bge = bge;
-
-			m_plptfi.Add(ptfi);
-			iValue++;
-			}
-
-		if (m_sbh != null)
-			{
-			if (dxMax > dxQuarter * cxQuarters)
-				{
-				m_sbh.Minimum = 0;
-				m_sbh.Maximum = (int)(((dxMax / dxQuarter)) - (m_cgp.nDays * 24 * 4));
-				m_sbh.Visible = true;
-				}
-			else
-				{
-				m_sbh.Visible = false;
-				}
-			}
-
-		m_dyPerBgUnit = dyBg;
-		m_dxQuarter = dxQuarter;
-	}
-
-	//	___  ____ _ _  _ ___ _ _  _ ____
-	//	|__] |__| | |\ |  |  | |\ | | __
-	//	|    |  | | | \|  |  | | \| |__]
-
-	/* D R A W  B A N N E R */
-	/*----------------------------------------------------------------------------
-		%%Function: DrawBanner
-		%%Qualified: bg.Grapher.DrawBanner
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void DrawBanner(Graphics gr, RectangleF rcf)
-	{
-		Font font = new Font("Tahoma", 12);
-
-//		gr.DrawString("Graph", font, new SolidBrush(Color.Black), rcf);
-	}
-
-	/* P A I N T */
-	/*----------------------------------------------------------------------------
-		%%Function: Paint
-		%%Qualified: bg.Grapher.Paint
-		%%Contact: rlittle
-
-	----------------------------------------------------------------------------*/
-	public void Paint(Graphics gr)
-	{
-		// there are several things that have to happen.
-
-		// 1. Draw the shaded ranges
-		// 2. Draw the grid lines
-		// 3. Draw the actual points
-
-		// ------------------------------
-		// FIRST:  Draw the shaded ranges
-		// ------------------------------
-		int dxAdjust = (int)(m_iFirstQuarter * m_dxQuarter);	// how much should 0 based x-coordinates be adjusted?
-		PTFI ptfi = (PTFI)m_plptfi[0];
-		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
-
-//		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_dxLeftMargin, 
-//													   m_dyTopMargin, // m_dyOffset + 
-//													   ((float)m_nWidth) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_nHeight) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
-
-		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_rcfDrawing.Left, 
-													   m_rcfDrawing.Top, // m_dyOffset + 
-													   m_rcfDrawing.Width - m_dxOffset,
-													   m_rcfDrawing.Height - m_dyOffset); 
-//													   ((float)m_nWidth) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_nHeight) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
-
-		RectangleF rectfGraphFullClip = m_rcfDrawing; // new RectangleF(m_dxLeftMargin, 
-//													   m_dyTopMargin, 
-//													   ((float)m_nWidth) - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_nHeight) - m_dyTopMargin - m_dyBottomMargin);
-//		
-		gr.SetClip(rectfGraphBodyClip);
-		ShadeCurvedRanges(gr, dxAdjust, dttmFirst);
-		gr.ResetClip();
-
-		// -----------------------------------------
-		// SECOND: Draw the gridlines and the legend
-		// -----------------------------------------
-
-		gr.SetClip(rectfGraphFullClip);
-
-		SolidBrush brushBlue = new SolidBrush(Color.Blue);
-		Pen penBlue = new Pen(Color.Blue, (float)1);
-		Pen penGrid = new Pen(Color.DarkGray, (float)1);
-		Pen penLightGrid = new Pen(Color.LightGray, (float)1);
-		Pen penMeal = new Pen(Color.Green, 1.0F);
-
-		double dxFirstQuarter = m_iFirstQuarter * m_dxQuarter + (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/);
-		double dxLastQuarter = dxFirstQuarter + (m_cgp.nDays * 24 * 4) * m_dxQuarter;
-
-		gr.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-		// now we've found the first index we're going to draw
-		DateTime dttm = DateTime.Parse(dttmFirst.ToString("d"));
-
-		// figure out the number of quarters in the first date we want
-		// to display
-
-		int nDayFirst = (m_iFirstQuarter + 95) / (4 * 24) - 1;
-		Font font = new Font("Tahoma", 8);
-		// now we know (rounded up), what the first day will be
-		// as a delta from the first day
-		dttm = dttm.AddDays(nDayFirst);
-		
-		float dyOffsetRegion = m_dyOffset / 4;
-		float yDateLegend = m_rcfDrawing.Bottom - m_dyOffset + dyOffsetRegion * 1.3F; // m_nHeight - m_dyBottomMargin - m_dyOffset + dyOffsetRegion * 1.3F;
-		float xMacLastDrawn = 0.0F;
-		float xMacNoonLastDrawn = 0.0F;
-
-		for (int nDay = nDayFirst; nDay <= nDayFirst + m_cgp.nDays; nDay++)
-			{
-			dttm = dttm.AddDays(1);
-			string s = dttm.ToString("MM/dd");
-			SizeF szf = gr.MeasureString(s, font);
-			float x = XFromDate(dttmFirst, dttm, m_dxQuarter) - dxAdjust;
-
-
-			if (x > m_rcfDrawing.Left + m_dxOffset)
-				gr.DrawLine(penLightGrid, x, yDateLegend + dyOffsetRegion, x, 0);
-
-			if (x + (float)m_dxQuarter * (4.0F * 12.0F) > m_rcfDrawing.Left + m_dxOffset)
-				gr.DrawLine(penGrid, x + (float)m_dxQuarter * (4.0F * 12.0F), yDateLegend + dyOffsetRegion, x + (float)m_dxQuarter * (4.0F * 12.0F), 0);
-
-			Font fontSmall = new Font("Tahoma", 6);
-
-			float dxNoon = gr.MeasureString("12:00pm", fontSmall).Width;
-			if (xMacNoonLastDrawn < x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F)
-				{
-				gr.DrawString("12:00pm", fontSmall, brushBlue, x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F, yDateLegend + dyOffsetRegion / 2.2F);
-				xMacNoonLastDrawn = x + (float)m_dxQuarter * (4.0F * 12.0F) + dxNoon / 2.0F;
-				}
-			x -= (szf.Width / 2.0F);
-			if (xMacLastDrawn < x)
-				{
-				gr.DrawString(s, font, brushBlue, x, yDateLegend + dyOffsetRegion);
-				xMacLastDrawn = x + gr.MeasureString(s, font).Width;
-				}
-			}
-
-		int i, iLast;
-
-		// put legend up
-		int n;
-		int dn = ((int)m_cgp.dBgHigh - (int)m_cgp.dBgLow) / m_cgp.nIntervals;
-
-		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, m_rcfDrawing.Top, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend);
-		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend, m_nWidth + m_dxOffset, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, m_dyTopMargin, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend, m_nWidth, yDateLegend);
-		bool fLine = false;
-
-		for (n = (int)m_cgp.dBgLow; n <= (int)m_cgp.dBgHigh; n += dn)
-			{
-			float x = m_rcfDrawing.Left /*m_dxLeftMargin*/ + 2.0F;
-			float y = YFromReading(n, m_dyPerBgUnit);
-
-			if (fLine)
-				gr.DrawLine(penGrid, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F, y, m_nWidth, y);
-			fLine = !fLine;
-
-			y -= (gr.MeasureString(n.ToString(), font).Height / 2.0F);
-			x = (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F - gr.MeasureString(n.ToString(), font).Width;
-			gr.DrawString(n.ToString(), font, brushBlue, x, y);
-			}
-
-		gr.ResetClip();
-
-		gr.SetClip(rectfGraphBodyClip);
-		// ------------------------------
-		// THIRD: Graph the points
-		// ------------------------------
-
-		PTFI ptfiLastMeal = new PTFI();
-
-		ptfiLastMeal.bge = null;
-
-		for (i = 0, iLast = m_plptfi.Count; i < iLast; i++)
-			{
-			PointF ptf = ((PTFI)m_plptfi[i]).ptf;
-
-			// if its before our first point, skip it
-			if (ptf.X < dxFirstQuarter)
-				continue;
-
-			ptfi = ((PTFI)m_plptfi[i]);
-			ptf = ptfi.ptf;
-
-			if (ptf.Y == -1.0F && ptfi.bge.Reading == 0)
-				{
-				// lets get a real Y value for this by plotting a line on the curve
-				if (i > 0)
-					ptf.Y = ((PTFI)m_plptfi[i-1]).ptf.Y;
-				else if (i < iLast)
-					ptf.Y = ((PTFI)m_plptfi[i+1]).ptf.Y;
-				else
-					ptf.Y = 0;
-				ptfi.ptf = ptf;
-				m_plptfi[i] = ptfi;
-				}
-
-			if (ptfiLastMeal.bge != null && m_cgp.fShowMeals)
-				{
-				if (ptfiLastMeal.bge.Date.AddMinutes(90.0) <= ptfi.bge.Date
-					&& ptfiLastMeal.bge.Date.AddMinutes(150.0) >= ptfi.bge.Date)
-					{
-					float yAdjust;
-					float xLast = ptfiLastMeal.ptf.X - dxAdjust;
-					float yLast = ptfiLastMeal.ptf.Y;
-
-					yAdjust = ptf.Y - yLast;
-
-					if (yAdjust < 0.0F)
-						yAdjust -= 15.0F;
-					else
-						yAdjust += 15.0F;
-
-					// we have a match
-					gr.DrawLine(penMeal, xLast + 1, yLast, xLast + 1, yLast + yAdjust);
-					gr.DrawLine(penMeal, xLast + 1, yLast + yAdjust, ptf.X + 1 - dxAdjust, yLast + yAdjust);
-					gr.DrawLine(penMeal, ptf.X + 1 - dxAdjust, yLast + yAdjust, ptf.X + 1 - dxAdjust, ptf.Y + 1);
-					ptfiLastMeal.bge = null;
-					}
-				else if (ptfiLastMeal.bge.Date.AddHours(150.0) < ptfi.bge.Date)
-					ptfiLastMeal.bge = null;
-				}
-
-			if (ptfi.bge.Type != BGE.ReadingType.SpotTest)
-				ptfiLastMeal = ptfi;
-
-			if (ptf.X > dxLastQuarter)
-				break;
-
-			gr.FillEllipse(brushBlue, ptf.X - 1 - dxAdjust, ptf.Y - 1, 4, 4);
-			if (i > 0)
-				{
-				PointF ptfLast = ((PTFI)m_plptfi[i - 1]).ptf;
-
-				if (ptfLast.X >= dxFirstQuarter)
-					gr.DrawLine(penBlue,  ptfLast.X + 1 - dxAdjust, ptfLast.Y + 1, ptf.X + 1 - dxAdjust, ptf.Y + 1);
-				}
-			}
-		// if we were doing the translucent range shading, we'd do it here.
-//			ShadeRanges(pb, gr);
-		gr.ResetClip();
-		m_dxAdjust = dxAdjust;
-	}
-
-
-	public bool FGetLastDateTimeOnPage(out DateTime dttm)
-	{
-		DateTime dttmLast = ((PTFI)m_plptfi[m_plptfi.Count - 1]).bge.Date;
-
-		dttm = GetFirstDateTime();
-
-		if (dttm.AddDays(m_cgp.nDays) > dttmLast)
-			return false;
-
-		dttm = dttm.AddDays(m_cgp.nDays);
-		return true;
-	}
-
-	void AddCurvePoint(double dNext, double dCur, ref double dCum, ref ArrayList plptf, int dxAdjust, DateTime dttmFirst, ref DateTime dttm, double dHours, int nReading, int nPctSlop, int nPctAbove)
-	{
-		if (dNext - dCur - dCum < dHours)
-			return;
-
-		dCum += dHours;
-		DateTime dttmForRender;
-		dttmForRender = dttm.AddHours(dHours + (((double)dHours * (double)nPctSlop) / 100.0));
-		dttm = dttm.AddHours(dHours);
-		float x = XFromDate(dttmFirst, dttmForRender, m_dxQuarter) - dxAdjust;
-
-		PointF ptf = new PointF(x, YFromReading(nReading + (nReading * nPctAbove) / 100, m_dyPerBgUnit));
-		plptf.Add(ptf);
-	}
-
-	void ShadeRanges2(Graphics gr, int dxAdjust, DateTime dttmFirst, SolidBrush hBrushTrans, int nPctSlop, int nPctAbove)
-	{
-		// ok
-		// shade the regions
-		float yMin = YFromReading(80, m_dyPerBgUnit);
-		float yMax = YFromReading(120, m_dyPerBgUnit);
-
-
-		// ok, there are 7 days, starting at dttmFirst
-		int iDay = 0;
-
-		DateTime dttmCur;
-
-		dttmCur = dttmFirst.AddMinutes(m_iFirstQuarter * 15.0);
-		dttmCur = new DateTime(dttmCur.Year, dttmCur.Month, dttmCur.Day);
-
-		ArrayList plptf = new ArrayList();
-
-		double []dMeals = { 8.0, 12.0, 18.0 };
-		double dHours = 0.0;
-		int iplptfi = 0;
-
-		while (iplptfi < m_plptfi.Count)
-			{
-			PTFI ptfi = (PTFI)m_plptfi[iplptfi];
-
-			if (ptfi.bge.Date >= dttmCur)
-				break;
-			iplptfi++;
-			}
-
-		AddCurvePoint(24.0, 0, ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0, 130, 0, nPctAbove);
-		for (; iDay < m_cgp.nDays + 2; iDay++)
-			{
-			// now, first analyze the day and determine when the meals are...otherwise, use the default meal times
-			dMeals[0] = 8.0;
-			dMeals[1] = 12.0;
-			dMeals[2] = 18.0;
-
-			// now, see if we can find meals in our day
-			DateTime dttmNext = dttmCur.AddDays(1);
-
-			while (iplptfi < m_plptfi.Count)
-				{
-				PTFI ptfi = (PTFI)m_plptfi[iplptfi];
-
-				if (ptfi.bge.Date >= dttmNext)
-					break;
-
-				if (ptfi.bge.Type == BGE.ReadingType.Dinner)
-					dMeals[2] = ptfi.bge.Date.Hour;
-				else if (ptfi.bge.Type == BGE.ReadingType.Breakfast)
-					dMeals[0] = ptfi.bge.Date.Hour;
-				else if (ptfi.bge.Type == BGE.ReadingType.Lunch)
-					dMeals[1] = ptfi.bge.Date.Hour;
-				iplptfi++;
-				}
-
-			dHours = 0;
-			AddCurvePoint(dMeals[0], 0.0, ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, dMeals[0], 120, -nPctSlop, nPctAbove);	// 0800
-
-			dHours = 0;
-			AddCurvePoint(dMeals[1], dMeals[0], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 180, -nPctSlop, nPctAbove);	// 0830
-			AddCurvePoint(dMeals[1], dMeals[0], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 1.0, 180, 0, nPctAbove);	// 0930
-			AddCurvePoint(dMeals[1], dMeals[0], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 160, nPctSlop, nPctAbove);	// 1000
-			AddCurvePoint(dMeals[1], dMeals[0], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 1.5, 120, nPctSlop, nPctAbove);	// 1130
-
-			AddCurvePoint(dMeals[1], dMeals[0], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, dMeals[1] - dMeals[0] - dHours, 120, 0, nPctAbove);	// 1200
-
-			dHours = 0;
-			AddCurvePoint(dMeals[2], dMeals[1], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 180, -nPctSlop, nPctAbove);	// 1230
-			AddCurvePoint(dMeals[2], dMeals[1], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 1.0, 180, 0, nPctAbove);	// 1330
-			AddCurvePoint(dMeals[2], dMeals[1], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 160, nPctSlop, nPctAbove);	// 1400
-			AddCurvePoint(dMeals[2], dMeals[1], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 1.5, 120, nPctSlop, nPctAbove);	// 1530
-
-			AddCurvePoint(dMeals[2], dMeals[1], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, dMeals[2] - dMeals[1] - dHours, 120, 0, nPctAbove);	// 1800
-
-			dHours = 0;
-			AddCurvePoint(24.00, dMeals[2], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 180, -nPctSlop, nPctAbove);	// 1830
-			AddCurvePoint(24.00, dMeals[2], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 1.0, 180, 0, nPctAbove);	// 1930
-			AddCurvePoint(24.00, dMeals[2], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0.5, 160, nPctSlop, nPctAbove);	// 2000
-			AddCurvePoint(24.00, dMeals[2], ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 24.0 - dMeals[2] - dHours, 140, nPctSlop, nPctAbove);	// 2400
-			// repeat for 7 days worth
-			}
-
-		// ok, now just fill a line back to the beginning
-		while (iDay >= 0)
-			{
-			float x = XFromDate(dttmFirst, dttmCur, m_dxQuarter) - dxAdjust;
-			float y = YFromReading(80 - (80 * nPctAbove) / 100, m_dyPerBgUnit);
-
-			PointF ptf = new PointF(x, y);
-			plptf.Add(ptf);
-			dttmCur = dttmCur.AddDays(-1);
-			iDay--;
-			}
-
-		PointF[] points;
-
-		points = new PointF[plptf.Count];
-
-		int iptf = 0;
-
-		foreach (PointF ptf in plptf)
-			{
-			points[iptf] = ptf;
-			iptf++;
-			}
-
-		FillMode fm = FillMode.Winding;
-
-		gr.FillClosedCurve(hBrushTrans, points, fm, 0.2F);
-	}
-
-	void ShadeCurvedRanges(Graphics gr, int dxAdjust, DateTime dttmFirst)
-	{
-		SolidBrush hBrushTrans;
-
-		if (m_fColor)
-			hBrushTrans = new SolidBrush(Color.FromArgb(255, 255, 255, 167));
-		else
-			hBrushTrans = new SolidBrush(Color.FromArgb(255, 215, 215, 215));
-
-		ShadeRanges2(gr, dxAdjust, dttmFirst, hBrushTrans, 10, 20);
-
-		if (m_fColor)
-			hBrushTrans = new SolidBrush(Color.FromArgb(255, 174, 255, 174));
-		else
-			hBrushTrans = new SolidBrush(Color.FromArgb(255, 192, 192, 192));
-		ShadeRanges2(gr, dxAdjust, dttmFirst, hBrushTrans, 0, 0);
-
-	}
-
-	void ShadeRanges(Graphics gr)
-	{
-		// shade the regions
-		float yMin = YFromReading(80, m_dyPerBgUnit);
-		float yMax = YFromReading(120, m_dyPerBgUnit);
-
-		SolidBrush hBrushTrans = new SolidBrush(Color.FromArgb(64, 0, 255, 0));
-
-		gr.FillRectangle(hBrushTrans, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/), yMax, m_nWidth, Math.Abs(yMax - yMin));
-
-		yMin = YFromReading(120, m_dyPerBgUnit);
-		yMax = YFromReading(140, m_dyPerBgUnit);
-
-		hBrushTrans = new SolidBrush(Color.FromArgb(64, 255, 255, 0));
-
-		gr.FillRectangle(hBrushTrans, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/), yMax, m_nWidth, Math.Abs(yMax - yMin));
-
-		yMin = YFromReading(60, m_dyPerBgUnit);
-		yMax = YFromReading(80, m_dyPerBgUnit);
-
-		gr.FillRectangle(hBrushTrans, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/), yMax, m_nWidth, Math.Abs(yMax - yMin));
-	}
-
-	public bool FHitTest(Point ptClient, out object oHit, out RectangleF rectfHit)
-	{
-		rectfHit = new RectangleF();;
-		PTFI ptfiHit;
-
-		// figure out what we hit.
-
-		// convert the pt into a raw point compatible with our array
-		PointF ptfArray = new PointF(((float)ptClient.X) + m_dxAdjust, (float)ptClient.Y);
-
-		ptfiHit = new PTFI();
-		bool fHit = false;
-
-		// now we can go searching for a point this corresponds to
-		foreach (PTFI ptfi in m_plptfi)
-			{
-			rectfHit = new RectangleF(ptfi.ptf.X - 4.0F, ptfi.ptf.Y - 4.0F, 8.0F, 8.0F);
-
-			if (!rectfHit.Contains(ptfArray))
-				continue;
-
-			fHit = true;
-			ptfiHit = ptfi;
-
-			break;
-			}
-
-		oHit = ptfiHit;
-		return fHit;
-	}
-
-}
 
 public class ListViewItemComparer : IComparer
 {
@@ -2067,20 +388,6 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.Label label12;
 	private System.Windows.Forms.Label label14;
 	private System.Windows.Forms.TextBox m_ebFastLength;
-	private System.Windows.Forms.GroupBox groupBox1;
-	private System.Windows.Forms.Label label21;
-	private System.Windows.Forms.Label label22;
-	private System.Windows.Forms.TextBox m_ebLifetimeAvg;
-	private System.Windows.Forms.GroupBox groupBox2;
-	private System.Windows.Forms.TextBox m_ebAvg30;
-	private System.Windows.Forms.TextBox m_ebFastingAvg;
-	private System.Windows.Forms.TextBox m_ebFastingAvg30;
-	private System.Windows.Forms.GroupBox groupBox3;
-	private System.Windows.Forms.TextBox m_ebFastingAvg15;
-	private System.Windows.Forms.TextBox m_ebAvg15;
-	private System.Windows.Forms.GroupBox groupBox4;
-	private System.Windows.Forms.TextBox m_ebFastingAvg7;
-	private System.Windows.Forms.TextBox m_ebAvg7;
 	private System.Windows.Forms.Label label28;
 	private System.Windows.Forms.Label label29;
 	private System.Windows.Forms.CheckBox m_cbShowMeals;
@@ -2106,37 +413,11 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.ComboBox m_cbxFilterType;
 	private System.Windows.Forms.Label label13;
 	private System.Windows.Forms.Button button1;
-	private System.Windows.Forms.Label label34;
-	private System.Windows.Forms.Label label35;
+	private System.Windows.Forms.CheckBox m_cbShowInterp;
+	private System.Windows.Forms.ListView m_lvStats; 
+	private SortedList m_slsMeals;
 	private System.Windows.Forms.Label label20;
-	private System.Windows.Forms.Label label23;
-	private System.Windows.Forms.Label label36;
-	private System.Windows.Forms.Label label37;
-	private System.Windows.Forms.Label label24;
-	private System.Windows.Forms.Label label25;
-	private System.Windows.Forms.Label label32;
-	private System.Windows.Forms.Label label33;
-	private System.Windows.Forms.Label label26;
-	private System.Windows.Forms.Label label27;
-	private System.Windows.Forms.Label label38;
-	private System.Windows.Forms.Label label39;
-	private System.Windows.Forms.TextBox m_ebA1c;
-	private System.Windows.Forms.TextBox m_ebAvgWgt;
-	private System.Windows.Forms.GroupBox groupBox5;
-	private System.Windows.Forms.Label label40;
-	private System.Windows.Forms.Label label41;
-	private System.Windows.Forms.Label label42;
-	private System.Windows.Forms.Label label43;
-	private System.Windows.Forms.TextBox m_ebA1c90;
-	private System.Windows.Forms.TextBox m_ebWgtAvg90;
-	private System.Windows.Forms.TextBox m_ebA1c30;
-	private System.Windows.Forms.TextBox m_ebWgtAvg30;
-	private System.Windows.Forms.TextBox m_ebA1c15;
-	private System.Windows.Forms.TextBox m_ebWgtAvg15;
-	private System.Windows.Forms.TextBox m_ebA1c7;
-	private System.Windows.Forms.TextBox m_ebWgtAvg7;
-	private System.Windows.Forms.TextBox m_ebAvg90;
-	private System.Windows.Forms.TextBox m_ebFastingAvg90; 
+	private System.Windows.Forms.ComboBox m_cbxMeal;
 
 	/// <summary>
 	/// Required designer variable.
@@ -2156,6 +437,7 @@ public class _bg : System.Windows.Forms.Form
 		m_cbxUpper.SelectedIndex = 1;
 		m_cbxLower.SelectedIndex = 0;
 		SetupListView(m_lvHistory);
+		SetupListViewStats(m_lvStats);
 		LoadBgData();
 
 		m_cbxOrient.SelectedIndex = 1;
@@ -2187,6 +469,8 @@ public class _bg : System.Windows.Forms.Form
 	{
 		this.m_tabc = new System.Windows.Forms.TabControl();
 		this.m_tabEntry = new System.Windows.Forms.TabPage();
+		this.label20 = new System.Windows.Forms.Label();
+		this.m_cbxMeal = new System.Windows.Forms.ComboBox();
 		this.button1 = new System.Windows.Forms.Button();
 		this.m_ebComment = new System.Windows.Forms.TextBox();
 		this.label9 = new System.Windows.Forms.Label();
@@ -2206,15 +490,8 @@ public class _bg : System.Windows.Forms.Form
 		this.label2 = new System.Windows.Forms.Label();
 		this.label1 = new System.Windows.Forms.Label();
 		this.m_tabAnalysis = new System.Windows.Forms.TabPage();
-		this.groupBox5 = new System.Windows.Forms.GroupBox();
-		this.m_ebA1c90 = new System.Windows.Forms.TextBox();
-		this.m_ebWgtAvg90 = new System.Windows.Forms.TextBox();
-		this.label40 = new System.Windows.Forms.Label();
-		this.label41 = new System.Windows.Forms.Label();
-		this.label42 = new System.Windows.Forms.Label();
-		this.label43 = new System.Windows.Forms.Label();
-		this.m_ebFastingAvg90 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg90 = new System.Windows.Forms.TextBox();
+		this.m_lvStats = new System.Windows.Forms.ListView();
+		this.m_cbShowInterp = new System.Windows.Forms.CheckBox();
 		this.label13 = new System.Windows.Forms.Label();
 		this.m_cbxDateRange = new System.Windows.Forms.ComboBox();
 		this.m_cbxFilterType = new System.Windows.Forms.ComboBox();
@@ -2239,42 +516,6 @@ public class _bg : System.Windows.Forms.Form
 		this.m_ebFirst = new System.Windows.Forms.TextBox();
 		this.label29 = new System.Windows.Forms.Label();
 		this.label28 = new System.Windows.Forms.Label();
-		this.groupBox4 = new System.Windows.Forms.GroupBox();
-		this.m_ebA1c7 = new System.Windows.Forms.TextBox();
-		this.m_ebWgtAvg7 = new System.Windows.Forms.TextBox();
-		this.label26 = new System.Windows.Forms.Label();
-		this.label27 = new System.Windows.Forms.Label();
-		this.label38 = new System.Windows.Forms.Label();
-		this.label39 = new System.Windows.Forms.Label();
-		this.m_ebFastingAvg7 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg7 = new System.Windows.Forms.TextBox();
-		this.groupBox3 = new System.Windows.Forms.GroupBox();
-		this.m_ebA1c15 = new System.Windows.Forms.TextBox();
-		this.m_ebWgtAvg15 = new System.Windows.Forms.TextBox();
-		this.label24 = new System.Windows.Forms.Label();
-		this.label25 = new System.Windows.Forms.Label();
-		this.label32 = new System.Windows.Forms.Label();
-		this.label33 = new System.Windows.Forms.Label();
-		this.m_ebFastingAvg15 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg15 = new System.Windows.Forms.TextBox();
-		this.groupBox2 = new System.Windows.Forms.GroupBox();
-		this.m_ebA1c30 = new System.Windows.Forms.TextBox();
-		this.m_ebWgtAvg30 = new System.Windows.Forms.TextBox();
-		this.label20 = new System.Windows.Forms.Label();
-		this.label23 = new System.Windows.Forms.Label();
-		this.label36 = new System.Windows.Forms.Label();
-		this.label37 = new System.Windows.Forms.Label();
-		this.m_ebFastingAvg30 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg30 = new System.Windows.Forms.TextBox();
-		this.groupBox1 = new System.Windows.Forms.GroupBox();
-		this.m_ebA1c = new System.Windows.Forms.TextBox();
-		this.label35 = new System.Windows.Forms.Label();
-		this.m_ebAvgWgt = new System.Windows.Forms.TextBox();
-		this.label34 = new System.Windows.Forms.Label();
-		this.m_ebFastingAvg = new System.Windows.Forms.TextBox();
-		this.m_ebLifetimeAvg = new System.Windows.Forms.TextBox();
-		this.label22 = new System.Windows.Forms.Label();
-		this.label21 = new System.Windows.Forms.Label();
 		this.m_ebFastLength = new System.Windows.Forms.TextBox();
 		this.label14 = new System.Windows.Forms.Label();
 		this.label12 = new System.Windows.Forms.Label();
@@ -2287,11 +528,6 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.SuspendLayout();
 		this.m_tabEntry.SuspendLayout();
 		this.m_tabAnalysis.SuspendLayout();
-		this.groupBox5.SuspendLayout();
-		this.groupBox4.SuspendLayout();
-		this.groupBox3.SuspendLayout();
-		this.groupBox2.SuspendLayout();
-		this.groupBox1.SuspendLayout();
 		this.SuspendLayout();
 		// 
 		// m_tabc
@@ -2305,13 +541,15 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.Location = new System.Drawing.Point(16, 24);
 		this.m_tabc.Name = "m_tabc";
 		this.m_tabc.SelectedIndex = 0;
-		this.m_tabc.Size = new System.Drawing.Size(528, 472);
+		this.m_tabc.Size = new System.Drawing.Size(520, 528);
 		this.m_tabc.TabIndex = 0;
 		this.m_tabc.SelectedIndexChanged += new System.EventHandler(this.ChangeTabs);
 		// 
 		// m_tabEntry
 		// 
 		this.m_tabEntry.Controls.AddRange(new System.Windows.Forms.Control[] {
+																				 this.label20,
+																				 this.m_cbxMeal,
 																				 this.button1,
 																				 this.m_ebComment,
 																				 this.label9,
@@ -2332,9 +570,27 @@ public class _bg : System.Windows.Forms.Form
 																				 this.label1});
 		this.m_tabEntry.Location = new System.Drawing.Point(4, 22);
 		this.m_tabEntry.Name = "m_tabEntry";
-		this.m_tabEntry.Size = new System.Drawing.Size(520, 446);
+		this.m_tabEntry.Size = new System.Drawing.Size(512, 502);
 		this.m_tabEntry.TabIndex = 0;
 		this.m_tabEntry.Text = "Data Entry";
+		// 
+		// label20
+		// 
+		this.label20.Location = new System.Drawing.Point(16, 133);
+		this.label20.Name = "label20";
+		this.label20.Size = new System.Drawing.Size(56, 23);
+		this.label20.TabIndex = 19;
+		this.label20.Text = "Comment";
+		// 
+		// m_cbxMeal
+		// 
+		this.m_cbxMeal.ItemHeight = 13;
+		this.m_cbxMeal.Location = new System.Drawing.Point(72, 104);
+		this.m_cbxMeal.MaxDropDownItems = 25;
+		this.m_cbxMeal.Name = "m_cbxMeal";
+		this.m_cbxMeal.Size = new System.Drawing.Size(424, 21);
+		this.m_cbxMeal.Sorted = true;
+		this.m_cbxMeal.TabIndex = 18;
 		// 
 		// button1
 		// 
@@ -2347,7 +603,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebComment
 		// 
-		this.m_ebComment.Location = new System.Drawing.Point(72, 101);
+		this.m_ebComment.Location = new System.Drawing.Point(72, 128);
 		this.m_ebComment.Name = "m_ebComment";
 		this.m_ebComment.Size = new System.Drawing.Size(424, 20);
 		this.m_ebComment.TabIndex = 13;
@@ -2355,11 +611,11 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label9
 		// 
-		this.label9.Location = new System.Drawing.Point(16, 104);
+		this.label9.Location = new System.Drawing.Point(16, 109);
 		this.label9.Name = "label9";
 		this.label9.Size = new System.Drawing.Size(56, 23);
 		this.label9.TabIndex = 12;
-		this.label9.Text = "Comment";
+		this.label9.Text = "Meal";
 		// 
 		// m_ebCarbs
 		// 
@@ -2387,15 +643,15 @@ public class _bg : System.Windows.Forms.Form
 		// m_lvHistory
 		// 
 		this.m_lvHistory.LabelEdit = true;
-		this.m_lvHistory.Location = new System.Drawing.Point(16, 152);
+		this.m_lvHistory.Location = new System.Drawing.Point(16, 184);
 		this.m_lvHistory.Name = "m_lvHistory";
-		this.m_lvHistory.Size = new System.Drawing.Size(488, 288);
+		this.m_lvHistory.Size = new System.Drawing.Size(488, 312);
 		this.m_lvHistory.TabIndex = 16;
 		this.m_lvHistory.Click += new System.EventHandler(this.HandleHistoryClick);
 		// 
 		// label7
 		// 
-		this.label7.Location = new System.Drawing.Point(8, 128);
+		this.label7.Location = new System.Drawing.Point(16, 160);
 		this.label7.Name = "label7";
 		this.label7.TabIndex = 14;
 		this.label7.Text = "History";
@@ -2461,6 +717,7 @@ public class _bg : System.Windows.Forms.Form
 		this.m_cbxType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
 		this.m_cbxType.Items.AddRange(new object[] {
 													   "Breakfast",
+													   "Control",
 													   "Lunch",
 													   "Dinner",
 													   "Snack",
@@ -2489,7 +746,8 @@ public class _bg : System.Windows.Forms.Form
 		// m_tabAnalysis
 		// 
 		this.m_tabAnalysis.Controls.AddRange(new System.Windows.Forms.Control[] {
-																					this.groupBox5,
+																					this.m_lvStats,
+																					this.m_cbShowInterp,
 																					this.label13,
 																					this.m_cbxDateRange,
 																					this.m_cbxFilterType,
@@ -2514,10 +772,6 @@ public class _bg : System.Windows.Forms.Form
 																					this.m_ebFirst,
 																					this.label29,
 																					this.label28,
-																					this.groupBox4,
-																					this.groupBox3,
-																					this.groupBox2,
-																					this.groupBox1,
 																					this.m_ebFastLength,
 																					this.label14,
 																					this.label12,
@@ -2529,92 +783,26 @@ public class _bg : System.Windows.Forms.Form
 																					this.m_pbGraph});
 		this.m_tabAnalysis.Location = new System.Drawing.Point(4, 22);
 		this.m_tabAnalysis.Name = "m_tabAnalysis";
-		this.m_tabAnalysis.Size = new System.Drawing.Size(520, 446);
+		this.m_tabAnalysis.Size = new System.Drawing.Size(512, 502);
 		this.m_tabAnalysis.TabIndex = 1;
 		this.m_tabAnalysis.Text = "Analysis";
 		// 
-		// groupBox5
+		// m_lvStats
 		// 
-		this.groupBox5.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebA1c90,
-																				this.m_ebWgtAvg90,
-																				this.label40,
-																				this.label41,
-																				this.label42,
-																				this.label43,
-																				this.m_ebFastingAvg90,
-																				this.m_ebAvg90});
-		this.groupBox5.Location = new System.Drawing.Point(152, 304);
-		this.groupBox5.Name = "groupBox5";
-		this.groupBox5.Size = new System.Drawing.Size(136, 64);
-		this.groupBox5.TabIndex = 43;
-		this.groupBox5.TabStop = false;
-		this.groupBox5.Text = "90 Day Averages";
-		this.groupBox5.Enter += new System.EventHandler(this.groupBox5_Enter);
+		this.m_lvStats.Location = new System.Drawing.Point(8, 296);
+		this.m_lvStats.Name = "m_lvStats";
+		this.m_lvStats.Size = new System.Drawing.Size(504, 144);
+		this.m_lvStats.TabIndex = 46;
 		// 
-		// m_ebA1c90
+		// m_cbShowInterp
 		// 
-		this.m_ebA1c90.Location = new System.Drawing.Point(104, 32);
-		this.m_ebA1c90.Name = "m_ebA1c90";
-		this.m_ebA1c90.Size = new System.Drawing.Size(24, 20);
-		this.m_ebA1c90.TabIndex = 12;
-		this.m_ebA1c90.Text = "5.5";
-		// 
-		// m_ebWgtAvg90
-		// 
-		this.m_ebWgtAvg90.Location = new System.Drawing.Point(72, 32);
-		this.m_ebWgtAvg90.Name = "m_ebWgtAvg90";
-		this.m_ebWgtAvg90.Size = new System.Drawing.Size(24, 20);
-		this.m_ebWgtAvg90.TabIndex = 11;
-		this.m_ebWgtAvg90.Text = "444";
-		// 
-		// label40
-		// 
-		this.label40.Location = new System.Drawing.Point(104, 16);
-		this.label40.Name = "label40";
-		this.label40.Size = new System.Drawing.Size(24, 16);
-		this.label40.TabIndex = 10;
-		this.label40.Text = "a1c";
-		// 
-		// label41
-		// 
-		this.label41.Location = new System.Drawing.Point(72, 16);
-		this.label41.Name = "label41";
-		this.label41.Size = new System.Drawing.Size(24, 16);
-		this.label41.TabIndex = 9;
-		this.label41.Text = "Wgt";
-		// 
-		// label42
-		// 
-		this.label42.Location = new System.Drawing.Point(40, 16);
-		this.label42.Name = "label42";
-		this.label42.Size = new System.Drawing.Size(32, 16);
-		this.label42.TabIndex = 8;
-		this.label42.Text = "Fast";
-		// 
-		// label43
-		// 
-		this.label43.Location = new System.Drawing.Point(16, 16);
-		this.label43.Name = "label43";
-		this.label43.Size = new System.Drawing.Size(24, 16);
-		this.label43.TabIndex = 7;
-		this.label43.Text = "All";
-		// 
-		// m_ebFastingAvg90
-		// 
-		this.m_ebFastingAvg90.Location = new System.Drawing.Point(40, 32);
-		this.m_ebFastingAvg90.Name = "m_ebFastingAvg90";
-		this.m_ebFastingAvg90.Size = new System.Drawing.Size(24, 20);
-		this.m_ebFastingAvg90.TabIndex = 3;
-		this.m_ebFastingAvg90.Text = "444";
-		// 
-		// m_ebAvg90
-		// 
-		this.m_ebAvg90.Location = new System.Drawing.Point(8, 32);
-		this.m_ebAvg90.Name = "m_ebAvg90";
-		this.m_ebAvg90.Size = new System.Drawing.Size(24, 20);
-		this.m_ebAvg90.TabIndex = 1;
-		this.m_ebAvg90.Text = "444";
+		this.m_cbShowInterp.Checked = true;
+		this.m_cbShowInterp.CheckState = System.Windows.Forms.CheckState.Checked;
+		this.m_cbShowInterp.Location = new System.Drawing.Point(152, 248);
+		this.m_cbShowInterp.Name = "m_cbShowInterp";
+		this.m_cbShowInterp.Size = new System.Drawing.Size(152, 24);
+		this.m_cbShowInterp.TabIndex = 45;
+		this.m_cbShowInterp.Text = "Show Interpolations";
 		// 
 		// label13
 		// 
@@ -2832,334 +1020,6 @@ public class _bg : System.Windows.Forms.Form
 		this.label28.Text = "Statistics";
 		this.label28.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
 		// 
-		// groupBox4
-		// 
-		this.groupBox4.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebA1c7,
-																				this.m_ebWgtAvg7,
-																				this.label26,
-																				this.label27,
-																				this.label38,
-																				this.label39,
-																				this.m_ebFastingAvg7,
-																				this.m_ebAvg7});
-		this.groupBox4.Location = new System.Drawing.Point(152, 376);
-		this.groupBox4.Name = "groupBox4";
-		this.groupBox4.Size = new System.Drawing.Size(136, 64);
-		this.groupBox4.TabIndex = 0;
-		this.groupBox4.TabStop = false;
-		this.groupBox4.Text = "7 Day Averages";
-		// 
-		// m_ebA1c7
-		// 
-		this.m_ebA1c7.Location = new System.Drawing.Point(104, 32);
-		this.m_ebA1c7.Name = "m_ebA1c7";
-		this.m_ebA1c7.Size = new System.Drawing.Size(24, 20);
-		this.m_ebA1c7.TabIndex = 16;
-		this.m_ebA1c7.Text = "5.5";
-		// 
-		// m_ebWgtAvg7
-		// 
-		this.m_ebWgtAvg7.Location = new System.Drawing.Point(72, 32);
-		this.m_ebWgtAvg7.Name = "m_ebWgtAvg7";
-		this.m_ebWgtAvg7.Size = new System.Drawing.Size(24, 20);
-		this.m_ebWgtAvg7.TabIndex = 15;
-		this.m_ebWgtAvg7.Text = "444";
-		// 
-		// label26
-		// 
-		this.label26.Location = new System.Drawing.Point(104, 16);
-		this.label26.Name = "label26";
-		this.label26.Size = new System.Drawing.Size(24, 16);
-		this.label26.TabIndex = 14;
-		this.label26.Text = "a1c";
-		// 
-		// label27
-		// 
-		this.label27.Location = new System.Drawing.Point(72, 16);
-		this.label27.Name = "label27";
-		this.label27.Size = new System.Drawing.Size(24, 16);
-		this.label27.TabIndex = 13;
-		this.label27.Text = "Wgt";
-		// 
-		// label38
-		// 
-		this.label38.Location = new System.Drawing.Point(40, 16);
-		this.label38.Name = "label38";
-		this.label38.Size = new System.Drawing.Size(32, 16);
-		this.label38.TabIndex = 12;
-		this.label38.Text = "Fast";
-		// 
-		// label39
-		// 
-		this.label39.Location = new System.Drawing.Point(16, 16);
-		this.label39.Name = "label39";
-		this.label39.Size = new System.Drawing.Size(24, 16);
-		this.label39.TabIndex = 11;
-		this.label39.Text = "All";
-		// 
-		// m_ebFastingAvg7
-		// 
-		this.m_ebFastingAvg7.Location = new System.Drawing.Point(40, 32);
-		this.m_ebFastingAvg7.Name = "m_ebFastingAvg7";
-		this.m_ebFastingAvg7.Size = new System.Drawing.Size(24, 20);
-		this.m_ebFastingAvg7.TabIndex = 2;
-		this.m_ebFastingAvg7.Text = "textBox2";
-		// 
-		// m_ebAvg7
-		// 
-		this.m_ebAvg7.Location = new System.Drawing.Point(8, 32);
-		this.m_ebAvg7.Name = "m_ebAvg7";
-		this.m_ebAvg7.Size = new System.Drawing.Size(24, 20);
-		this.m_ebAvg7.TabIndex = 0;
-		this.m_ebAvg7.Text = "m_ebAvg30";
-		// 
-		// groupBox3
-		// 
-		this.groupBox3.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebA1c15,
-																				this.m_ebWgtAvg15,
-																				this.label24,
-																				this.label25,
-																				this.label32,
-																				this.label33,
-																				this.m_ebFastingAvg15,
-																				this.m_ebAvg15});
-		this.groupBox3.Location = new System.Drawing.Point(8, 376);
-		this.groupBox3.Name = "groupBox3";
-		this.groupBox3.Size = new System.Drawing.Size(136, 64);
-		this.groupBox3.TabIndex = 33;
-		this.groupBox3.TabStop = false;
-		this.groupBox3.Text = "15 Day Averages";
-		// 
-		// m_ebA1c15
-		// 
-		this.m_ebA1c15.Location = new System.Drawing.Point(104, 32);
-		this.m_ebA1c15.Name = "m_ebA1c15";
-		this.m_ebA1c15.Size = new System.Drawing.Size(24, 20);
-		this.m_ebA1c15.TabIndex = 16;
-		this.m_ebA1c15.Text = "5.5";
-		// 
-		// m_ebWgtAvg15
-		// 
-		this.m_ebWgtAvg15.Location = new System.Drawing.Point(72, 32);
-		this.m_ebWgtAvg15.Name = "m_ebWgtAvg15";
-		this.m_ebWgtAvg15.Size = new System.Drawing.Size(24, 20);
-		this.m_ebWgtAvg15.TabIndex = 15;
-		this.m_ebWgtAvg15.Text = "444";
-		// 
-		// label24
-		// 
-		this.label24.Location = new System.Drawing.Point(104, 16);
-		this.label24.Name = "label24";
-		this.label24.Size = new System.Drawing.Size(24, 16);
-		this.label24.TabIndex = 14;
-		this.label24.Text = "a1c";
-		// 
-		// label25
-		// 
-		this.label25.Location = new System.Drawing.Point(72, 16);
-		this.label25.Name = "label25";
-		this.label25.Size = new System.Drawing.Size(24, 16);
-		this.label25.TabIndex = 13;
-		this.label25.Text = "Wgt";
-		// 
-		// label32
-		// 
-		this.label32.Location = new System.Drawing.Point(40, 16);
-		this.label32.Name = "label32";
-		this.label32.Size = new System.Drawing.Size(32, 16);
-		this.label32.TabIndex = 12;
-		this.label32.Text = "Fast";
-		// 
-		// label33
-		// 
-		this.label33.Location = new System.Drawing.Point(16, 16);
-		this.label33.Name = "label33";
-		this.label33.Size = new System.Drawing.Size(24, 16);
-		this.label33.TabIndex = 11;
-		this.label33.Text = "All";
-		// 
-		// m_ebFastingAvg15
-		// 
-		this.m_ebFastingAvg15.Location = new System.Drawing.Point(40, 32);
-		this.m_ebFastingAvg15.Name = "m_ebFastingAvg15";
-		this.m_ebFastingAvg15.Size = new System.Drawing.Size(24, 20);
-		this.m_ebFastingAvg15.TabIndex = 3;
-		this.m_ebFastingAvg15.Text = "444";
-		// 
-		// m_ebAvg15
-		// 
-		this.m_ebAvg15.Location = new System.Drawing.Point(8, 32);
-		this.m_ebAvg15.Name = "m_ebAvg15";
-		this.m_ebAvg15.Size = new System.Drawing.Size(24, 20);
-		this.m_ebAvg15.TabIndex = 1;
-		this.m_ebAvg15.Text = "444";
-		// 
-		// groupBox2
-		// 
-		this.groupBox2.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebA1c30,
-																				this.m_ebWgtAvg30,
-																				this.label20,
-																				this.label23,
-																				this.label36,
-																				this.label37,
-																				this.m_ebFastingAvg30,
-																				this.m_ebAvg30});
-		this.groupBox2.Location = new System.Drawing.Point(304, 304);
-		this.groupBox2.Name = "groupBox2";
-		this.groupBox2.Size = new System.Drawing.Size(136, 64);
-		this.groupBox2.TabIndex = 32;
-		this.groupBox2.TabStop = false;
-		this.groupBox2.Text = "30 Day Averages";
-		// 
-		// m_ebA1c30
-		// 
-		this.m_ebA1c30.Location = new System.Drawing.Point(104, 32);
-		this.m_ebA1c30.Name = "m_ebA1c30";
-		this.m_ebA1c30.Size = new System.Drawing.Size(24, 20);
-		this.m_ebA1c30.TabIndex = 12;
-		this.m_ebA1c30.Text = "5.5";
-		// 
-		// m_ebWgtAvg30
-		// 
-		this.m_ebWgtAvg30.Location = new System.Drawing.Point(72, 32);
-		this.m_ebWgtAvg30.Name = "m_ebWgtAvg30";
-		this.m_ebWgtAvg30.Size = new System.Drawing.Size(24, 20);
-		this.m_ebWgtAvg30.TabIndex = 11;
-		this.m_ebWgtAvg30.Text = "444";
-		// 
-		// label20
-		// 
-		this.label20.Location = new System.Drawing.Point(104, 16);
-		this.label20.Name = "label20";
-		this.label20.Size = new System.Drawing.Size(24, 16);
-		this.label20.TabIndex = 10;
-		this.label20.Text = "a1c";
-		// 
-		// label23
-		// 
-		this.label23.Location = new System.Drawing.Point(72, 16);
-		this.label23.Name = "label23";
-		this.label23.Size = new System.Drawing.Size(24, 16);
-		this.label23.TabIndex = 9;
-		this.label23.Text = "Wgt";
-		// 
-		// label36
-		// 
-		this.label36.Location = new System.Drawing.Point(40, 16);
-		this.label36.Name = "label36";
-		this.label36.Size = new System.Drawing.Size(32, 16);
-		this.label36.TabIndex = 8;
-		this.label36.Text = "Fast";
-		// 
-		// label37
-		// 
-		this.label37.Location = new System.Drawing.Point(16, 16);
-		this.label37.Name = "label37";
-		this.label37.Size = new System.Drawing.Size(24, 16);
-		this.label37.TabIndex = 7;
-		this.label37.Text = "All";
-		// 
-		// m_ebFastingAvg30
-		// 
-		this.m_ebFastingAvg30.Location = new System.Drawing.Point(40, 32);
-		this.m_ebFastingAvg30.Name = "m_ebFastingAvg30";
-		this.m_ebFastingAvg30.Size = new System.Drawing.Size(24, 20);
-		this.m_ebFastingAvg30.TabIndex = 3;
-		this.m_ebFastingAvg30.Text = "444";
-		// 
-		// m_ebAvg30
-		// 
-		this.m_ebAvg30.Location = new System.Drawing.Point(8, 32);
-		this.m_ebAvg30.Name = "m_ebAvg30";
-		this.m_ebAvg30.Size = new System.Drawing.Size(24, 20);
-		this.m_ebAvg30.TabIndex = 1;
-		this.m_ebAvg30.Text = "444";
-		// 
-		// groupBox1
-		// 
-		this.groupBox1.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebA1c,
-																				this.label35,
-																				this.m_ebAvgWgt,
-																				this.label34,
-																				this.m_ebFastingAvg,
-																				this.m_ebLifetimeAvg,
-																				this.label22,
-																				this.label21});
-		this.groupBox1.Location = new System.Drawing.Point(8, 304);
-		this.groupBox1.Name = "groupBox1";
-		this.groupBox1.Size = new System.Drawing.Size(136, 64);
-		this.groupBox1.TabIndex = 31;
-		this.groupBox1.TabStop = false;
-		this.groupBox1.Text = "Lifetime Averages";
-		// 
-		// m_ebA1c
-		// 
-		this.m_ebA1c.Location = new System.Drawing.Point(104, 32);
-		this.m_ebA1c.Name = "m_ebA1c";
-		this.m_ebA1c.Size = new System.Drawing.Size(24, 20);
-		this.m_ebA1c.TabIndex = 7;
-		this.m_ebA1c.Text = "5.5";
-		// 
-		// label35
-		// 
-		this.label35.Location = new System.Drawing.Point(104, 16);
-		this.label35.Name = "label35";
-		this.label35.Size = new System.Drawing.Size(24, 16);
-		this.label35.TabIndex = 6;
-		this.label35.Text = "a1c";
-		// 
-		// m_ebAvgWgt
-		// 
-		this.m_ebAvgWgt.Location = new System.Drawing.Point(72, 32);
-		this.m_ebAvgWgt.Name = "m_ebAvgWgt";
-		this.m_ebAvgWgt.Size = new System.Drawing.Size(24, 20);
-		this.m_ebAvgWgt.TabIndex = 5;
-		this.m_ebAvgWgt.Text = "444";
-		// 
-		// label34
-		// 
-		this.label34.Location = new System.Drawing.Point(72, 16);
-		this.label34.Name = "label34";
-		this.label34.Size = new System.Drawing.Size(24, 16);
-		this.label34.TabIndex = 4;
-		this.label34.Text = "Wgt";
-		// 
-		// m_ebFastingAvg
-		// 
-		this.m_ebFastingAvg.Location = new System.Drawing.Point(40, 32);
-		this.m_ebFastingAvg.Name = "m_ebFastingAvg";
-		this.m_ebFastingAvg.Size = new System.Drawing.Size(24, 20);
-		this.m_ebFastingAvg.TabIndex = 3;
-		this.m_ebFastingAvg.Text = "444";
-		// 
-		// m_ebLifetimeAvg
-		// 
-		this.m_ebLifetimeAvg.Location = new System.Drawing.Point(8, 32);
-		this.m_ebLifetimeAvg.Name = "m_ebLifetimeAvg";
-		this.m_ebLifetimeAvg.Size = new System.Drawing.Size(24, 20);
-		this.m_ebLifetimeAvg.TabIndex = 1;
-		this.m_ebLifetimeAvg.Text = "444";
-		// 
-		// label22
-		// 
-		this.label22.Location = new System.Drawing.Point(40, 16);
-		this.label22.Name = "label22";
-		this.label22.Size = new System.Drawing.Size(32, 16);
-		this.label22.TabIndex = 2;
-		this.label22.Text = "Fast";
-		// 
-		// label21
-		// 
-		this.label21.Location = new System.Drawing.Point(16, 16);
-		this.label21.Name = "label21";
-		this.label21.Size = new System.Drawing.Size(24, 16);
-		this.label21.TabIndex = 0;
-		this.label21.Text = "All";
-		// 
 		// m_ebFastLength
 		// 
 		this.m_ebFastLength.Location = new System.Drawing.Point(432, 83);
@@ -3242,7 +1102,7 @@ public class _bg : System.Windows.Forms.Form
 		// _bg
 		// 
 		this.AutoScaleBaseSize = new System.Drawing.Size(5, 13);
-		this.ClientSize = new System.Drawing.Size(552, 518);
+		this.ClientSize = new System.Drawing.Size(544, 574);
 		this.Controls.AddRange(new System.Windows.Forms.Control[] {
 																	  this.m_tabc});
 		this.Name = "_bg";
@@ -3250,11 +1110,6 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.ResumeLayout(false);
 		this.m_tabEntry.ResumeLayout(false);
 		this.m_tabAnalysis.ResumeLayout(false);
-		this.groupBox5.ResumeLayout(false);
-		this.groupBox4.ResumeLayout(false);
-		this.groupBox3.ResumeLayout(false);
-		this.groupBox2.ResumeLayout(false);
-		this.groupBox1.ResumeLayout(false);
 		this.ResumeLayout(false);
 
 	}
@@ -3301,6 +1156,7 @@ public class _bg : System.Windows.Forms.Form
 		lv.Columns[4].Text = "Comment";
 		lv.Columns[4].Width = 256;
 
+		lv.Columns[0].Width = 128;
 
 		lv.FullRowSelect = true;
 		lv.MultiSelect = false;
@@ -3309,6 +1165,45 @@ public class _bg : System.Windows.Forms.Form
 		m_lvHistory.ListViewItemSorter = new ListViewItemComparer(0);
 		m_lvHistory.ColumnClick += new ColumnClickEventHandler(HandleColumn);
 		AddBge(null);
+	}
+
+	/* S E T U P  L I S T  V I E W  S T A T S */
+	/*----------------------------------------------------------------------------
+		%%Function: SetupListViewStats
+		%%Qualified: bg._bg.SetupListViewStats
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	void SetupListViewStats(ListView lv)
+	{
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[0].Text = "Description";
+		lv.Columns[0].Width = 100;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[1].Text = "All";
+		lv.Columns[1].Width = 45;
+		lv.Columns[1].TextAlign = HorizontalAlignment.Right;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[2].Text = "Fast";
+		lv.Columns[2].Width = 45;
+		lv.Columns[2].TextAlign = HorizontalAlignment.Right;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[3].Text = "Wgt";
+		lv.Columns[3].Width = 45;
+		lv.Columns[3].TextAlign = HorizontalAlignment.Right;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[4].Text = "A1c";
+		lv.Columns[4].Width = 45;
+		lv.Columns[4].TextAlign = HorizontalAlignment.Right;
+
+
+		lv.FullRowSelect = true;
+		lv.MultiSelect = false;
+		lv.View = View.Details;
 	}
 
 	/* I N I T  R E A D I N G S */
@@ -3322,6 +1217,7 @@ public class _bg : System.Windows.Forms.Form
 	void InitReadings()
 	{
 		m_slbge = new SortedList();
+		m_slsMeals = new SortedList();
 	}
 
 	/* L O A D  B G  D A T A */
@@ -3352,7 +1248,7 @@ public class _bg : System.Windows.Forms.Form
 				{
 				BGE bge;
 
-				string sDate, sTime, sType, sComment;
+				string sDate, sTime, sType, sComment, sMeal;
 				int nBg, nCarbs;
 				BGE.ReadingType type;
 
@@ -3366,6 +1262,11 @@ public class _bg : System.Windows.Forms.Form
 
 				try
 				{
+					sMeal = nodeT.SelectSingleNode("b:meal", nsmgr).InnerText;
+				} catch { sMeal = ""; };
+
+				try
+				{
 					nCarbs = Int32.Parse(nodeT.SelectSingleNode("b:carbs", nsmgr).InnerText);
 				} catch { nCarbs = 0; };
 
@@ -3375,20 +1276,39 @@ public class _bg : System.Windows.Forms.Form
 				} catch { nBg = 0; }
 				type = BGE.ReadingTypeFromString(sType);
 				
-				bge = new BGE(sDate, sTime, type, nBg, nCarbs, sComment);
-				m_slbge.Add(bge.Date.ToString("s"), bge);
+				bge = new BGE(sDate, sTime, type, nBg, nCarbs, sComment, sMeal);
+				m_slbge.Add(bge.Key, bge);
 				}
 			}
 
 		foreach (BGE bge in m_slbge.Values)
 			{
 			AddBge(bge);
+
+			try
+				{
+				if (bge.Meal.Length > 0)
+					{
+					m_slsMeals.Add(bge.Meal, bge.Meal);
+					m_cbxMeal.Items.Add(bge.Meal);
+					}
+				}
+			catch 
+				{
+				}
 			}
 
 		m_dom = dom;
 		m_nsmgr = nsmgr;
 	}
 
+	/* U P D A T E  B G E */
+	/*----------------------------------------------------------------------------
+		%%Function: UpdateBge
+		%%Qualified: bg._bg.UpdateBge
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	void UpdateBge(BGE bge, ListViewItem lvi)
 	{
 		lvi.Tag = bge;
@@ -3399,7 +1319,7 @@ public class _bg : System.Windows.Forms.Form
 			}
 		else
 			{
-			lvi.SubItems[4].Text = bge.Comment;
+			lvi.SubItems[4].Text = bge.FullComment;
 			if (bge.Carbs != 0)
 				lvi.SubItems[3].Text = bge.Carbs.ToString();
 			lvi.SubItems[2].Text = bge.Reading.ToString();
@@ -3435,13 +1355,20 @@ public class _bg : System.Windows.Forms.Form
 		UpdateBge(bge, lvi);
 	}
 
+	/* A D D  E N T R Y  C O R E */
+	/*----------------------------------------------------------------------------
+		%%Function: AddEntryCore
+		%%Qualified: bg._bg.AddEntryCore
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	void AddEntryCore(BGE bge, bool fFromDevice)
 	{
 		BGE bgeCurrent = m_bgeCurrent;
 
 		if (fFromDevice)
 			{
-			int iKey = m_slbge.IndexOfKey(bge.Date.ToString("s"));
+			int iKey = m_slbge.IndexOfKey(bge.Key);
 
 			if (iKey >= 0)
 				{
@@ -3451,7 +1378,7 @@ public class _bg : System.Windows.Forms.Form
 					// readings match as does the date; nothing to do
 					return;
 
-				MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + ", bgeNew.Reading = " + bge.Reading.ToString());
+				MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + "("+bgeCurrent.Date.ToString("s")+"), bgeNew.Reading = " + bge.Reading.ToString());
 				return;
 				}
 			// no match yet...look for a "close" match
@@ -3464,11 +1391,12 @@ public class _bg : System.Windows.Forms.Form
 
 				if (bgeCurrent.Reading != bge.Reading)
 					{
-					MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + ", bgeNew.Reading = " + bge.Reading.ToString());
+					MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + "("+bgeCurrent.Date.ToString("s")+"), bgeNew.Reading = " + bge.Reading.ToString());
 					return;
 					}
 				// otherwise, fallthrough and do the update
 				bge.Comment = bgeCurrent.Comment;
+				bge.Meal = bgeCurrent.Meal;
 				bge.Type = bgeCurrent.Type;
 				}
 			}
@@ -3479,6 +1407,7 @@ public class _bg : System.Windows.Forms.Form
 		XmlNode nodeTime = m_dom.CreateElement("", "time", "http://www.thetasoft.com/schemas/bg");
 
 		XmlNode nodeComment = null;
+		XmlNode nodeMeal = null;
 		XmlNode nodeCarbs = null;
 
 		if (m_ebCarbs.Text.Length > 0)
@@ -3486,6 +1415,9 @@ public class _bg : System.Windows.Forms.Form
 
 		if (m_ebComment.Text.Length > 0)
 			nodeComment = m_dom.CreateElement("", "comment", "http://www.thetasoft.com/schemas/bg");
+
+		if (m_cbxMeal.Text.Length > 0)
+			nodeMeal = m_dom.CreateElement("", "meal", "http://www.thetasoft.com/schemas/bg");
 
 		nodeBg.InnerText = bge.Reading.ToString();
 		nodeDate.InnerText = bge.Date.ToString("d");
@@ -3505,13 +1437,19 @@ public class _bg : System.Windows.Forms.Form
 			nodeReading.AppendChild(nodeComment);
 			}
 
+		if (nodeMeal != null)
+			{
+			nodeMeal.InnerText = bge.Meal;
+			nodeReading.AppendChild(nodeMeal);
+			}
+
 		nodeReading.Attributes.Append(m_dom.CreateAttribute("type"));
 		nodeReading.Attributes["type"].Value = BGE.StringFromReadingType(bge.Type);
 
 		if (bgeCurrent == null)
 			{
 			int iKey;
-			if ((iKey = m_slbge.IndexOfKey(bge.Date.ToString("s"))) >= 0)
+			if ((iKey = m_slbge.IndexOfKey(bge.Key)) >= 0)
 				{
 				if (!fFromDevice)
 					{
@@ -3531,7 +1469,7 @@ public class _bg : System.Windows.Forms.Form
 				}
 
 			AddBge(bge);
-			m_slbge.Add(bge.Date.ToString("s"), bge);
+			m_slbge.Add(bge.Key, bge);
 			m_dom.SelectSingleNode("/b:bg", m_nsmgr).AppendChild(nodeReading);
 			m_dom.Save("c:\\docs\\bg.xml");
 			}
@@ -3546,6 +1484,19 @@ public class _bg : System.Windows.Forms.Form
 			// we need to edit the current item.
 			bgeCurrent.SetTo(bge);	// this takes care of m_slbge
 			ListViewItem lvi = null;
+
+			// try to add it to the list of available meals
+			try
+				{
+				if (bge.Meal.Length > 0)
+					{
+					m_slsMeals.Add(bge.Meal, bge.Meal);
+					m_cbxMeal.Items.Add(bge.Meal);
+					}
+				}
+			catch 
+				{
+				}
 
 			if (bgeCurrent != m_bgeCurrent)
 				{
@@ -3583,7 +1534,7 @@ public class _bg : System.Windows.Forms.Form
 	private void AddEntry(object sender, System.EventArgs e) 
 	{  
 		int nCarbs = m_ebCarbs.Text.Length > 0 ? Int32.Parse(m_ebCarbs.Text) : 0;
-		BGE bge = new BGE(m_ebDate.Text, m_ebTime.Text, BGE.ReadingTypeFromString(m_cbxType.Text), Int32.Parse(m_ebReading.Text), nCarbs, m_ebComment.Text);
+		BGE bge = new BGE(m_ebDate.Text, m_ebTime.Text, BGE.ReadingTypeFromString(m_cbxType.Text), Int32.Parse(m_ebReading.Text), nCarbs, m_ebComment.Text, m_cbxMeal.Text);
 
 		AddEntryCore(bge, false);
 	}
@@ -3620,6 +1571,7 @@ public class _bg : System.Windows.Forms.Form
 			m_ebDate.Text = System.DateTime.Now.ToString("d");
 			m_ebTime.Text = System.DateTime.Now.ToString("T", DateTimeFormatInfo.InvariantInfo);
 			m_ebComment.Text = "";
+			m_cbxMeal.Text = "";
 			m_cbxType.Text = "SpotTest";
 			m_ebReading.Text = "";
 			m_ebCarbs.Text = "";
@@ -3631,6 +1583,7 @@ public class _bg : System.Windows.Forms.Form
 			m_ebDate.Text = bge.Date.ToString("d");
 			m_ebTime.Text = bge.Date.ToString("T", DateTimeFormatInfo.InvariantInfo);
 			m_ebComment.Text = bge.Comment;
+			m_cbxMeal.Text = bge.Meal;
 			m_ebReading.Text = bge.Reading.ToString();
 			if (bge.Carbs != 0)
 				m_ebCarbs.Text = bge.Carbs.ToString(); 
@@ -3659,25 +1612,20 @@ public class _bg : System.Windows.Forms.Form
 		DisplayBge(bge);
 	}
 
-	private void DoReport(out string sReport, SortedList slbge)
-	{
-		sReport = "c:\\temp\\tempreport.htm";
-		StreamWriter sw = new StreamWriter(sReport);
-		sw.WriteLine("<html><body><table border=0>");
+	/* S L B G E  C A L C  C U S T O M */
+	/*----------------------------------------------------------------------------
+		%%Function: SlbgeCalcCustom
+		%%Qualified: bg._bg.SlbgeCalcCustom
+		%%Contact: rlittle
 
-		sw.WriteLine("<html><body><p><b>Hello world!</b></p></body></html>");
-		sw.Close();
-
-
-	}
-
-	SortedList SlbgeCalcCustom()
+	----------------------------------------------------------------------------*/
+	SortedList SlbgeCalcCustom(SortedList slbgeValues)
 	{
 		SortedList slbge = new SortedList();
 		DateTime dttmFirst = DateTime.Parse(m_ebFirst.Text);
 		DateTime dttmLast = DateTime.Parse(m_ebLast.Text).AddDays(1);
 
-		foreach (BGE bge in m_slbge.Values)
+		foreach (BGE bge in slbgeValues.Values)
 			{
 			if (bge.Type == BGE.ReadingType.Control)
 				continue;
@@ -3711,7 +1659,7 @@ public class _bg : System.Windows.Forms.Form
 						continue;
 					break;
 				}
-			slbge.Add(bge.Date.ToString("s"), bge);
+			slbge.Add(bge.Key, bge);
 			}
 		return slbge;
 	}
@@ -3728,9 +1676,9 @@ public class _bg : System.Windows.Forms.Form
 		SortedList slbge;
 
 		if (m_cbxFilterType.Text == "Fasting")
-            slbge = SlbgeCalcFasting();
+            slbge = SlbgeCalcFasting(m_cbShowInterp.Checked ? m_slbgeStats : m_slbge);
 		else
-			slbge = SlbgeCalcCustom();
+			slbge = SlbgeCalcCustom(m_cbShowInterp.Checked ? m_slbgeStats : m_slbge);
 
 		BgGraph bgg = new BgGraph();
 		BgGraph.BoxView bvUpper, bvLower;
@@ -3745,6 +1693,13 @@ public class _bg : System.Windows.Forms.Form
 		bgg.ShowDialog();
 	}
 
+	/* S E T  G R A P H  B O U N D S */
+	/*----------------------------------------------------------------------------
+		%%Function: SetGraphBounds
+		%%Qualified: bg._bg.SetGraphBounds
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	void SetGraphBounds(BgGraph bgg)
 	{
 		int nDays = 7;
@@ -3771,7 +1726,14 @@ public class _bg : System.Windows.Forms.Form
 		bgg.SetBounds(nLow, nHigh, nDays, nIntervals, m_cbShowMeals.Checked, fLandscape);
 	}
 
-	SortedList SlbgeCalcFasting()
+	/* S L B G E  C A L C  F A S T I N G */
+	/*----------------------------------------------------------------------------
+		%%Function: SlbgeCalcFasting
+		%%Qualified: bg._bg.SlbgeCalcFasting
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	SortedList SlbgeCalcFasting(SortedList slbgeValues)
 	{
 		DateTime dttmFirst = DateTime.Parse(m_ebFirst.Text);
 		DateTime dttmLast = DateTime.Parse(m_ebLast.Text).AddDays(1);
@@ -3786,7 +1748,7 @@ public class _bg : System.Windows.Forms.Form
 
 		DateTime dttmNextFast = DateTime.Parse("1/1/1900 12:00 AM");
 
-		foreach (BGE bge in m_slbge.Values)
+		foreach (BGE bge in slbgeValues.Values)
 			{
 			if (bge.Type == BGE.ReadingType.Control)
 				continue;
@@ -3797,7 +1759,7 @@ public class _bg : System.Windows.Forms.Form
 				if (bge.Reading != 0)
 					{
 					if (bge.Date >= dttmFirst && bge.Date < dttmLast)
-						slbge.Add(bge.Date.ToString("s"), bge);
+						slbge.Add(bge.Key, bge);
 					}
 				}
 
@@ -3835,17 +1797,14 @@ public class _bg : System.Windows.Forms.Form
 	}
 
 	private bool m_fDirtyStats = true;
-	private int m_nLifetimeAverage = 0;
-	private int m_nLifetimeFastingAverage = 0;
-	private int m_nLifetimeAverageWgt = 0;
 
-	private int m_n30DayAverage = 0;
-	private int m_n30DayFastingAverage = 0;
-	private int m_n15DayAverage = 0;
-	private int m_n15DayFastingAverage = 0;
-	private int m_n7DayAverage = 0;
-	private int m_n7DayFastingAverage = 0;
+	/* U P D A T E  C A R B  L I S T */
+	/*----------------------------------------------------------------------------
+		%%Function: UpdateCarbList
+		%%Qualified: bg._bg.UpdateCarbList
+		%%Contact: rlittle
 
+	----------------------------------------------------------------------------*/
 	private int UpdateCarbList(BGE bgeCur, ref SortedList slbge)
 	{
 		// retire all the items at the beginning of the list
@@ -3861,7 +1820,7 @@ public class _bg : System.Windows.Forms.Form
 
 		// now, if bgeCur has carbs, then add it to the list
 		if (bgeCur.Carbs > 0)
-			slbge.Add(bgeCur.Date.ToString("s"), bgeCur);
+			slbge.Add(bgeCur.Key, bgeCur);
 
 		int nCarbs = 0;
 
@@ -3876,8 +1835,10 @@ public class _bg : System.Windows.Forms.Form
 		return nCarbs;
 	}
 
+
 	class STN
 	{
+		public string sDesc;
 		public int nTotal;
 		public int cTotal;
 
@@ -3887,23 +1848,25 @@ public class _bg : System.Windows.Forms.Form
 		public Int64 nWgtTotal;
 		public Int64 cWgtTotal;
 
-		public TextBox ebAvg;
-		public TextBox ebFast;
-		public TextBox ebWgt;
-		public TextBox ebA1c;
-
 		public DateTime dttmCutoff;
+		public DateTime dttmCutoffLast;
 
-		public STN(TextBox ebAvgIn, TextBox ebFastIn, TextBox ebWgtIn, TextBox ebA1cIn, DateTime dttmCutoffIn)
+		public STN(string sDescIn, DateTime dttmCutoffIn, DateTime dttmCutoffLastIn)
 		{
+			sDesc = sDescIn;
 			nTotal = cTotal = nFastTotal = cFastTotal = 0;
 			nWgtTotal = cWgtTotal = 0;
 
-			ebAvg = ebAvgIn;
-			ebFast = ebFastIn;
-			ebWgt = ebWgtIn;
-			ebA1c = ebA1cIn;
 			dttmCutoff = dttmCutoffIn;
+			dttmCutoffLast = dttmCutoffLastIn;
+		}
+
+		public bool FMatch(BGE bge)
+		{
+			if (bge.Date >= dttmCutoff && bge.Date <= dttmCutoffLast)
+				return true;
+
+			return false;
 		}
 
 		public float A1c
@@ -3913,43 +1876,373 @@ public class _bg : System.Windows.Forms.Form
 				int nAvg = (int)(nWgtTotal / cWgtTotal);
 
 				float dA1c = (nAvg + 77.3f) / 35.6f;
+//				float dA1c = ((nAvg / 1.12f) + 86f) / 33.3f;
 				return dA1c;
 			}
 		}
 
-		public int Avg
-		{
-			get
-			{
-				return  nTotal / cTotal;
-			}
-		}
+		public int Avg { get { return  nTotal / cTotal; } }
+		public int FastAvg { get { return nFastTotal / cFastTotal; } }
+		public int WgtAvg { get { return (int)(nWgtTotal / cWgtTotal); } }
 
-		public int FastAvg
-		{
-			get
-			{
-				return nFastTotal / cFastTotal;
-			}
-		}
+		/* S E T  T E X T */
+		/*----------------------------------------------------------------------------
+			%%Function: SetText
+			%%Qualified: bg._bg:STN.SetText
+			
+			%%Contact: rlittle
 
-		public int WgtAvg
+			
+		----------------------------------------------------------------------------*/
+		public void SetText(ListView lv)
 		{
-			get
-			{
-				return (int)(nWgtTotal / cWgtTotal);
-			}
-		}
+			ListViewItem lvi = new ListViewItem();
 
-		public void SetText()
-		{
-			ebAvg.Text = Avg.ToString();
-			ebFast.Text = FastAvg.ToString();
-			ebWgt.Text = WgtAvg.ToString();
-			ebA1c.Text = A1c.ToString();
+			lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+			lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+			lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+			lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+			lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+
+			lv.Items.Add(lvi);
+			lvi.SubItems[4].Text = A1c.ToString("F");
+			lvi.SubItems[3].Text = WgtAvg.ToString();
+			lvi.SubItems[2].Text = FastAvg.ToString();
+			lvi.SubItems[1].Text = Avg.ToString();
+			lvi.SubItems[0].Text = sDesc;
+
+//			ebAvg.Text = Avg.ToString();
+//			ebFast.Text = FastAvg.ToString();
+//			ebWgt.Text = WgtAvg.ToString();
+//			ebA1c.Text = A1c.ToString();
 		}
 
 	};
+
+	class MP // Meal Profile
+	{
+		public enum MPT : int
+		{
+			Hour0 = 0,
+			Hour1 = 1,
+			Hour2 = 2,
+			Hour4 = 3,
+			PostMeal = 4,	// anything > 1.5H and < 3H
+			Morning = 5,	// the next morning, if this was a dinner
+			Last = Morning
+		}
+
+		int []m_mpmptcMeals;
+		int []m_mpmptnMealSum;
+
+		ArrayList m_plslbeMeals;
+
+		public MP()
+		{
+			m_mpmptcMeals = new int[(int)MPT.Morning];
+			m_mpmptnMealSum = new int[(int)MPT.Morning];
+
+			m_plslbeMeals = new ArrayList();
+		}
+
+		public int NGetSampleSize()
+		{
+			// every entry in mpmptnMeals should be the same except for
+			// (possibly) mptMorning -- that is only valid if the meal
+			// was a dinner, so a particular meal could have occured
+			// at dinner and also at non-dinner...
+			return m_mpmptcMeals[0];
+		}
+
+		public int NGetAvgForMpt(MPT mpt)
+		{
+			return m_mpmptnMealSum[(int)mpt] / m_mpmptcMeals[(int)mpt];
+		}
+
+		int NGetForDttm(SortedList slbge, BGE bgeRef, DateTime dttmNext, double dMinToleranceBack, double dMinToleranceForward)
+		{
+			int iFirst = 0;
+			int iKey = 0;
+			BGE bge = null;
+
+			iKey = iFirst = slbge.IndexOfKey(bgeRef.Key);
+
+			for ( ; iFirst >= 0; iFirst--)
+				{
+				bge = (BGE)slbge.GetByIndex(iFirst);
+
+				if (bge.Reading <= 0
+					|| bge.Type == BGE.ReadingType.Control)
+					{
+					continue;
+					}
+
+				if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
+					&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
+					{
+					return bge.Reading;
+					}
+
+				if (bge.Date < dttmNext.AddMinutes(-dMinToleranceBack))
+					break;
+				}
+
+			// no luck finding it going back; now look going forward
+			for (iFirst = iKey; iFirst < slbge.Count; iFirst++)
+				{
+				bge = (BGE)slbge.GetByIndex(iFirst);
+
+				if (bge.Reading <= 0
+					|| bge.Type == BGE.ReadingType.Control)
+					{
+					continue;
+					}
+
+				if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
+					&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
+					{
+					return bge.Reading;
+					}
+
+				if (bge.Date> dttmNext.AddMinutes(dMinToleranceForward))
+					break;
+				}
+
+			return 0;
+		}
+
+		/* A D D  M E A L */
+		/*----------------------------------------------------------------------------
+			%%Function: AddMeal
+			%%Qualified: bg._bg:MP.AddMeal
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
+		public void AddMeal(SortedList slbge, BGE bgeMeal)
+		{
+			m_plslbeMeals.Add(slbge);
+
+			int n;
+
+			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date, 90.0, 0.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.Hour0] += n;
+				m_mpmptcMeals[(int)MPT.Hour0]++;
+				}
+
+			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(60), 15.0, 15.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.Hour1] += n;
+				m_mpmptcMeals[(int)MPT.Hour1]++;
+				}
+
+			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 30.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.Hour2] += n;
+				m_mpmptcMeals[(int)MPT.Hour2]++;
+				}
+
+			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(240), 50.0, 50.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.Hour4] += n;
+				m_mpmptcMeals[(int)MPT.Hour4]++;
+				}
+
+			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 45.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.PostMeal] += n;
+				m_mpmptcMeals[(int)MPT.PostMeal]++;
+				}
+
+			if (bgeMeal.Type == BGE.ReadingType.Dinner)
+				{
+				// look for the following mornings first reading
+				n = NGetForDttm(slbge, bgeMeal, new DateTime(bgeMeal.Date.Year, bgeMeal.Date.Month, bgeMeal.Date.Day).AddDays(1.0).AddHours(5.0), 0.0, 240.0);
+				if (n != 0)
+					{
+					m_mpmptnMealSum[(int)MPT.Morning] += n;
+					m_mpmptcMeals[(int)MPT.Morning]++;
+					}
+				}
+		}
+	};
+
+	SortedList m_slbgeStats;
+	struct II // Interpolated Item
+	{
+		public Int64 nEst;
+		public Int64 cEst;
+	};
+
+	/* C L E A R  I N T E R P O L A T E D  E N T R I E S */
+	/*----------------------------------------------------------------------------
+		%%Function: ClearInterpolatedEntries
+		%%Qualified: bg._bg.ClearInterpolatedEntries
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	void ClearInterpolatedEntries(SortedList slbge)
+	{
+		int i;
+
+		for (i = slbge.Count - 1; i >= 0; i--)
+			{
+			BGE bge = (BGE)m_slbge.GetByIndex(i);
+
+			if (bge.InterpReading)
+				m_slbge.RemoveAt(i);
+			}
+	}
+
+	/* A D D  I N T E R P O L A T E D  B G E */
+	/*----------------------------------------------------------------------------
+		%%Function: AddInterpolatedBge
+		%%Qualified: bg._bg.AddInterpolatedBge
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	void AddInterpolatedBge(SortedList slbge, DateTime dttmEst, int nEst)
+	{
+		BGE bgeEst = new BGE(dttmEst.ToString("d"), dttmEst.ToString("T"), BGE.ReadingType.SpotTest, (int)nEst, 0, "interpolated", "");
+		int cTries = 0;
+		bgeEst.InterpReading = true;
+
+		while (cTries < 4) // we allow attempts to miss a duplicate item
+			{
+			try
+				{
+				slbge.Add(bgeEst.Key, bgeEst);
+				return;	// we succeeded!
+				}
+			catch
+				{
+				}
+			cTries++;
+			}
+
+		throw(new Exception("Too many BGE conflicts on interp add"));
+	}
+
+
+	/* B G E  P R E V  R E A D I N G */
+	/*----------------------------------------------------------------------------
+		%%Function: BgePrevReading
+		%%Qualified: bg._bg.BgePrevReading
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	BGE BgePrevReading(SortedList slbge, int iCur)
+	{
+		// walk backwards finding the first item with a reading that isn't a
+		// control
+		while (--iCur >= 0)
+			{
+			BGE bge = (BGE)slbge.GetByIndex(iCur);
+			if (bge.Reading != 0 && bge.Type != BGE.ReadingType.Control)
+				return bge;
+			}
+		return new BGE("1/1/1900", "00:00", BGE.ReadingType.Control, 0, 0, "null reading", "");
+	}
+
+	/* C R E A T E  I N T E R P O L A T I O N S */
+	/*----------------------------------------------------------------------------
+		%%Function: CreateInterpolations
+		%%Qualified: bg._bg.CreateInterpolations
+		%%Contact: rlittle
+
+		when we calculate weighted averages, we'd like to do it by just walking
+		the list of readings and figuring out the weightings based on that list.
+		it won't be that simple (since there are times when you weight forward
+		and other times you weight backwards (e.g. around meals)), but we don't
+		want to be in the business of creating interpolations at the same time.
+
+		to that end, let's create the interpolations now.
+	----------------------------------------------------------------------------*/
+	SortedList SlbgeCreateInterpolations(SortedList slbge)
+	{
+		SortedList slbgeStats = (SortedList) slbge.Clone(); // new SortedList();
+
+		int i;
+
+		// note that we check against the real count every time since we are
+		// adding items.
+
+		// TAKE CARE not to add items before the current item without carefully
+		// accounting for it with i
+		for (i = 0; i < slbgeStats.Count; i++)
+			{
+			BGE bge = (BGE)slbgeStats.GetByIndex(i);
+			BGE bgePrevReading = BgePrevReading(slbgeStats, i);
+
+			if (bge.Type == BGE.ReadingType.Control)
+				{
+				i++;
+				continue;
+				}
+
+			// if this entry has a reading, let's decide if we can weight the entire period of time from the last entry
+			// to now, or if we need to interpolate some netries.
+			if (bge.Reading != 0)
+				{
+				// if we have a previous reading...
+				if (bgePrevReading.Reading != 0)//  && bge.Date < dttmStop)
+					{
+					TimeSpan ts = bge.Date.Subtract(bgePrevReading.Date);
+
+					if (bgePrevReading.Carbs > 0)
+						{
+						TimeSpan tsCarb = bge.Date.Subtract(bgePrevReading.Date);
+
+						// if the reading since the carb were > 1.5 hours, we can 
+						// assume we didn't capture the spike.  use a guess of 10 bgc rise
+						// for each carb.  we will put this spike at 90 minutes postprandial
+						// (this is one of many tunable places)
+
+						if (tsCarb.TotalMinutes > 90)
+							{
+							// we are now saying that the last reading we have is the 90 minutes
+							// postprandial (the one we are estimating)
+
+							// calculate an estimate as a 30bgc per carb rise
+							int nEst = bgePrevReading.Reading + bgePrevReading.Carbs * 15;// * 30;
+							AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(90.0), nEst);
+
+							// now we want to just continue and reevaluate starting from the previous
+							// entry (essentially recursing)
+							i = slbgeStats.IndexOfKey(bgePrevReading.Key);
+							if (i < 0)
+								throw(new Exception("bgePrevReading doesn't have a key but it must!"));
+
+							continue;
+							}
+						}
+
+						// if the current reading is higher than the previous, assume its
+						// been that way for 1/4 of the time
+						if (bge.Reading > bgePrevReading.Reading && ts.Minutes > 2.0) // bgePrevReading.Reading)
+							{
+							int nEst = bge.Reading;
+							AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(ts.Minutes * 0.25), nEst);
+
+							// now we want to just continue and reevaluate starting from the previous
+							// entry (essentially recursing)
+							i = slbgeStats.IndexOfKey(bgePrevReading.Key);
+							if (i < 0)
+								throw(new Exception("bgePrevReading doesn't have a key but it must!"));
+
+							continue;
+							}
+						}
+				}
+			i++;
+			}
+		return slbgeStats;
+	}
 
 	/* C A L C  S T A T S */
 	/*----------------------------------------------------------------------------
@@ -3962,19 +2255,28 @@ public class _bg : System.Windows.Forms.Form
 	{
 		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
 
+		m_slbgeStats = new SortedList();
+
 		DateTime dttm90 = bgeLast.Date.AddDays(-90);
 		DateTime dttm30 = bgeLast.Date.AddDays(-30);
 		DateTime dttm15 = bgeLast.Date.AddDays(-15);
 		DateTime dttm7 = bgeLast.Date.AddDays(-7);
+		DateTime dttmNil = DateTime.Parse("12/31/2199");
+		DateTime dttm2ndVisit = DateTime.Parse("9/1/2004");
+		DateTime dttmLastVisit = DateTime.Parse("11/24/2004");
+		DateTime dttmFirstVisit = dttm2ndVisit.Date.AddDays(-90);
 
 		// switching to analysis.  If anything is dirty, then recalc
 		// the stats
 		STN []rgstn = new STN[] 
-			{ new STN(m_ebLifetimeAvg, m_ebFastingAvg, m_ebAvgWgt, m_ebA1c, DateTime.Parse("1/1/1900")),
-			  new STN(m_ebAvg90, m_ebFastingAvg90, m_ebWgtAvg90, m_ebA1c90, dttm90),
-			  new STN(m_ebAvg30, m_ebFastingAvg30, m_ebWgtAvg30, m_ebA1c30, dttm30),
-			  new STN(m_ebAvg15, m_ebFastingAvg15, m_ebWgtAvg15, m_ebA1c15, dttm15),
-			  new STN(m_ebAvg7, m_ebFastingAvg7, m_ebWgtAvg7, m_ebA1c7, dttm7) };
+			{ new STN("Lifetime", DateTime.Parse("1/1/1900"), dttmNil),
+			  new STN("Last 90 Days", dttm90, dttmNil),
+			  new STN("Last 30 Days", dttm30, dttmNil),
+			  new STN("Last 15 Days", dttm15, dttmNil),
+			  new STN("Last 7 Days", dttm7, dttmNil),
+			  new STN("9-1-04 A1c", dttmFirstVisit, dttm2ndVisit),
+			  new STN("11-24-04 A1c", dttm2ndVisit, dttmLastVisit),
+			};
 
 		int nFastLength = 8;
 
@@ -3988,37 +2290,11 @@ public class _bg : System.Windows.Forms.Form
 		DateTime dttmStop = DateTime.Parse("9/9/2004");
 
 		int nLastWgt = 0;
+		int nLastReadingReal = 0;
 		BGE bgePrev = null;
-
-		int nTotalFastingLifetime = 0;
-		int cFastingLifetime = 0;
-
-		int nTotalLifetime = 0;
-		int cLifetime = 0;
 
 		Int64 nWgtCur = 0;
 		Int64 cWgtCur = 0;
-
-		Int64 nTotalLifetimeWgt = 0;
-		Int64 cTotalLifetimeWgt = 0;
-
-		int nTotalFasting30 = 0;
-		int cFasting30 = 0;
-
-		int nTotal30 = 0;
-		int c30 = 0;
-
-		int nTotalFasting15 = 0;
-		int cFasting15 = 0;
-
-		int nTotal15 = 0;
-		int c15 = 0;
-
-		int nTotalFasting7 = 0;
-		int cFasting7 = 0;
-
-		int nTotal7 = 0;
-		int c7 = 0;
 
 
 		// we are interesting in keeping track of the last 4 hours of carb
@@ -4026,102 +2302,92 @@ public class _bg : System.Windows.Forms.Form
 		SortedList slbgeCarbs = new SortedList();
 		DateTime dttmLastCarb = new DateTime(1900, 1, 1);
 
-		foreach (BGE bge in m_slbge.Values)
+		Int64 nWgtDay = 0;
+		Int64 cWgtDay = 0;
+
+//		ClearInterpolatedValues(m_slbge);
+
+		m_slbgeStats = SlbgeCreateInterpolations(m_slbge);
+
+		foreach (BGE bgeStats in m_slbgeStats.Values)
 			{
-			if (bge.Type == BGE.ReadingType.Control)
+			BGE bgeReal = null;
+
+			if (!bgeStats.InterpReading)
+				bgeReal = (BGE)m_slbge.GetByIndex(m_slbge.IndexOfKey(bgeStats.Key));
+
+			if (bgePrev != null && bgeStats.Date.Day != bgePrev.Date.Day)
+				nWgtDay = cWgtDay = 0;
+
+//			if (bge.Date.Day == 9 && bge.Date.Month == 8 )
+//				Debugger.Break();
+
+			if (bgeStats.Type == BGE.ReadingType.Control)
 				continue;
 
-			int nCarbs = UpdateCarbList(bge, ref slbgeCarbs);
+			int nCarbs = UpdateCarbList(bgeStats, ref slbgeCarbs);
 			
 			if (dttmLastCarb.Year != 1900)
 				{
-				bge.MinutesSinceCarbs = (int)((bge.Date.Ticks - dttmLastCarb.Ticks) / (36000000000 / 60)); // number of hours
+				bgeStats.MinutesSinceCarbs = (int)((bgeStats.Date.Ticks - dttmLastCarb.Ticks) / (36000000000 / 60)); // number of hours
 				}
 			else
-				bge.MinutesSinceCarbs = -1;
+				bgeStats.MinutesSinceCarbs = -1;
 
-			bge.CarbsIn4 = nCarbs;
+			bgeStats.CarbsIn4 = nCarbs;
 
-			if (bge.Reading != 0)
+			// if this entry has a reading, let's decide if we can weight the entire period of time from the last entry
+			// to now, or if we need to interpolate some netries.
+			if (bgeStats.Reading != 0)
 				{
-				nTotalLifetime += bge.Reading;
-				cLifetime++;
-
 				nWgtCur = cWgtCur = 0;
 
+				// if we have a previous reading...
 				if (nLastWgt != 0)//  && bge.Date < dttmStop)
 					{
-					TimeSpan ts = bge.Date.Subtract(dttmLastWgt);
+					TimeSpan ts = bgeStats.Date.Subtract(dttmLastWgt);
+
 					Int64 nHours = ((Int64)(ts.TotalMinutes * 100) / 60);
-					Int64 nWgtEstCur = 0;
-					Int64 cWgtEstCur = 0;
 
-					if (bgePrev.Carbs > 0 && ts.TotalMinutes > 90)
+					if (bgePrev.Carbs > 0)
 						{
-						// if the readings since the carb were > 1.5 hours, we can 
-						// assume we didn't capture the spike.  use a guess of 20bgc rise
-						// for each carb
-
-						Int64 nRise;
-
-						if (ts.TotalMinutes > 90)
-							{
-							nRise = nLastWgt + bgePrev.Carbs * 40;
-							nWgtEstCur = (Int64)nRise * (cWgtEstCur = (Int64)(90 * 100 / 60));
-
-							nHours -= cWgtEstCur;
-							}
-
 						// assume that a greater reading immediately following a "carbs" entry
 						// will be higher previous to this reading
-						if (bge.Reading > bgeLast.Reading)
+						if (bgeStats.Reading > nLastWgt)
 							{
-							// don't let the previous reading (which was pre-meal) get weighted
-							// as such; treat the larger reading (post-meal) as the average)
-							nLastWgt = bge.Reading;
-							}
-						}
-					else
-						{
-						// if the current reading is higher than the previous, assume its
-						// been that way for 1/2 of the time
-						if (bge.Reading > bgeLast.Reading)
-							{
-							cWgtEstCur = (Int64)((ts.TotalMinutes * 100) / 60 / 2);
-							nHours -= cWgtEstCur;
-
-							nWgtEstCur = (bge.Reading * cWgtEstCur);
+							// don't let the previous reading (which was preprandial) get weighted
+							// as such; treat the larger reading (postprandial) as the average)
+							nLastWgt = bgeStats.Reading;
 							}
 						}
 
 					nWgtCur = ((Int64)nLastWgt) * nHours;
 					cWgtCur = nHours;
 
-					nWgtCur += nWgtEstCur;
-					cWgtCur += cWgtEstCur;
-					}
-				bgePrev = bge;
-				nLastWgt = bge.Reading;
-				dttmLastWgt = bge.Date;
+					nWgtDay += nWgtCur;
+					cWgtDay += cWgtCur;
 
-				nTotalLifetimeWgt += nWgtCur;
-				cTotalLifetimeWgt += cWgtCur;
+					bgeStats.WgtAvg = (int)(nWgtDay / cWgtDay);
+					}
+				nLastWgt = nLastReadingReal = bgeStats.Reading;
+				dttmLastWgt = bgeStats.Date;
 
 				int nFast = 0;
 				int cFast = 0;
 
 				// see if this one is a fasting
-				if (bge.Date > dttmNextFast)
+				if (bgeStats.Date > dttmNextFast)
 					{
-					nFast = bge.Reading;
+					nFast = bgeStats.Reading;
 					cFast = 1;
 					}
 
+
 				foreach (STN stn in rgstn)
 					{
-					if (bge.Date >= stn.dttmCutoff)
+					if (stn.FMatch(bgeStats))
 						{
-						stn.nTotal += bge.Reading;
+						stn.nTotal += bgeStats.Reading;
 						stn.cTotal++;
 						stn.nFastTotal += nFast;
 						stn.cFastTotal += cFast;
@@ -4129,93 +2395,44 @@ public class _bg : System.Windows.Forms.Form
 						stn.cWgtTotal += cWgtCur;
 						}
 					}
-
-				if (bge.Date >= dttm30)
-					{
-					nTotal30 += bge.Reading;
-					c30++;
-					}
-	
-				if (bge.Date >= dttm15)
-					{
-					nTotal15 += bge.Reading;
-					c15++;
-					}
-	
-				if (bge.Date >= dttm7)
-					{
-					nTotal7 += bge.Reading;
-					c7++;
-					}
-
-				// see if this one is a fasting
-				if (bge.Date > dttmNextFast)
-					{
-					nTotalFastingLifetime += bge.Reading;
-					cFastingLifetime++;
-	
-					if (bge.Date >= dttm30)
-						{
-						nTotalFasting30 += bge.Reading;
-						cFasting30++;
-						}
-					if (bge.Date >= dttm15)
-						{
-						nTotalFasting15 += bge.Reading;
-						cFasting15++;
-						}
-					if (bge.Date >= dttm7)
-						{
-						nTotalFasting7 += bge.Reading;
-						cFasting7++;
-						}
-					}
 				}
+
+			bgePrev = bgeStats;
 
 			// now see if this one should reset the fasting counter
-			if (bge.Type != BGE.ReadingType.SpotTest)
+			if (bgeStats.Type != BGE.ReadingType.SpotTest)
 				{
-				dttmNextFast = bge.Date.AddHours((double)nFastLength);
+				dttmNextFast = bgeStats.Date.AddHours((double)nFastLength);
 				}
-			if (bge.Carbs > 0)
-				dttmLastCarb = bge.Date;
+			if (bgeStats.Carbs > 0)
+				dttmLastCarb = bgeStats.Date;
+
+			if (bgeReal != null)
+				{
+				// propagate all the values that we calced from bgeStats to bgeReal
+				bgeReal.MinutesSinceCarbs = bgeStats.MinutesSinceCarbs;
+				bgeReal.CarbsIn4 = bgeStats.CarbsIn4;
+				bgeReal.WgtAvg = bgeStats.WgtAvg;
+				}
 			}
 
-		m_nLifetimeAverage = nTotalLifetime/ cLifetime;
-		m_nLifetimeFastingAverage = nTotalFastingLifetime / cFastingLifetime;
-		m_nLifetimeAverageWgt = (int)(nTotalLifetimeWgt / cTotalLifetimeWgt);
-		float dA1c = (m_nLifetimeAverageWgt + 77.3f) / 35.6f;
+		m_lvStats.Clear();
+		SetupListViewStats(m_lvStats);
+		foreach (STN stn in rgstn)
+			{
+			stn.SetText(m_lvStats);
+			}
 
-		m_n30DayAverage = nTotal30 / c30;
-		m_n30DayFastingAverage = nTotalFasting30 / cFasting30;
-		m_n15DayAverage = nTotal15 / c15;
-		m_n15DayFastingAverage = nTotalFasting15 / cFasting15;
-		m_n7DayAverage = nTotal7 / c7;
-		m_n7DayFastingAverage = nTotalFasting7 / cFasting7;
-
-		if (rgstn[0].Avg != m_nLifetimeAverage) throw(new Exception("mismatch!"));
-		if (rgstn[0].FastAvg != m_nLifetimeFastingAverage) throw(new Exception("mismatch!"));
-
-		if (rgstn[2].Avg != m_n30DayAverage) throw(new Exception("mismatch!"));
-		if (rgstn[2].FastAvg != m_n30DayFastingAverage) throw(new Exception("mismatch!"));
-		if (rgstn[3].Avg != m_n15DayAverage) throw(new Exception("mismatch!"));
-		if (rgstn[3].FastAvg != m_n15DayFastingAverage) throw(new Exception("mismatch!"));
-		if (rgstn[4].Avg != m_n7DayAverage) throw(new Exception("mismatch!"));
-		if (rgstn[4].FastAvg != m_n7DayFastingAverage) throw(new Exception("mismatch!"));
-
-		m_ebLifetimeAvg.Text = m_nLifetimeAverage.ToString();
-		m_ebFastingAvg.Text = m_nLifetimeFastingAverage.ToString();
-		m_ebAvgWgt.Text = m_nLifetimeAverageWgt.ToString();
-		m_ebA1c.Text = dA1c.ToString();
-		m_ebAvg30.Text = m_n30DayAverage.ToString();
-		m_ebFastingAvg30.Text = m_n30DayFastingAverage.ToString();
-		m_ebAvg15.Text = m_n15DayAverage.ToString();
-		m_ebFastingAvg15.Text = m_n15DayFastingAverage.ToString();
-		m_ebAvg7.Text = m_n7DayAverage.ToString();
-		m_ebFastingAvg7.Text = m_n7DayFastingAverage.ToString();
 		m_fDirtyStats = false;
 	}
 
+	/* C H A N G E  T A B S */
+	/*----------------------------------------------------------------------------
+		%%Function: ChangeTabs
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void ChangeTabs(object sender, System.EventArgs e) 
 	{
 		TabControl tabc = (TabControl)sender;
@@ -4226,6 +2443,13 @@ public class _bg : System.Windows.Forms.Form
 			}
 	}
 
+	/* S E T U P  7  D A Y  G R A P H */
+	/*----------------------------------------------------------------------------
+		%%Function: Setup7DayGraph
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void Setup7DayGraph(object sender, System.EventArgs e)
 	{
 		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
@@ -4237,6 +2461,13 @@ public class _bg : System.Windows.Forms.Form
 		m_ebLast.Enabled = false;
 	}
 
+	/* S E T U P  1  5  D A Y  G R A P H */
+	/*----------------------------------------------------------------------------
+		%%Function: Setup15DayGraph
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void Setup15DayGraph(object sender, System.EventArgs e)
 	{
 		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
@@ -4248,6 +2479,13 @@ public class _bg : System.Windows.Forms.Form
 		m_ebLast.Enabled = false;
 	}
 
+	/* S E T U P  3  0  D A Y  G R A P H */
+	/*----------------------------------------------------------------------------
+		%%Function: Setup30DayGraph
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void Setup30DayGraph(object sender, System.EventArgs e)
 	{
 		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
@@ -4259,6 +2497,14 @@ public class _bg : System.Windows.Forms.Form
 		m_ebLast.Enabled = false;
 	}
 
+	/* E N A B L E  C U S T O M  D A T E S */
+	/*----------------------------------------------------------------------------
+		%%Function: EnableCustomDates
+		%%Qualified: bg._bg.EnableCustomDates
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void EnableCustomDates(object sender, System.EventArgs e) 
 	{
 		if (m_ebLast.Text.Length <= 0)
@@ -4276,6 +2522,14 @@ public class _bg : System.Windows.Forms.Form
 		m_ebLast.Enabled = true;
 	}
 
+	/* S E L E C T  D A T E  R A N G E */
+	/*----------------------------------------------------------------------------
+		%%Function: SelectDateRange
+		%%Qualified: bg._bg.SelectDateRange
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void SelectDateRange(object sender, System.EventArgs e) 
 	{
 		ComboBox cbx = (ComboBox)sender;
@@ -4294,11 +2548,27 @@ public class _bg : System.Windows.Forms.Form
 	{
 		CommBaseSettings m_cbs;
 
+		/* C O M M  S E T T I N G S */
+		/*----------------------------------------------------------------------------
+			%%Function: CommSettings
+			%%Qualified: bg._bg:DevComm.CommSettings
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		protected override CommBaseSettings CommSettings()
 		{
 			return m_cbs;
 		}
 
+		/* I N I T */
+		/*----------------------------------------------------------------------------
+			%%Function: Init
+			%%Qualified: bg._bg:DevComm.Init
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		public void Init()
 		{
 			m_cbs = new CommBaseSettings();
@@ -4307,6 +2577,14 @@ public class _bg : System.Windows.Forms.Form
 			rgbRxBuffer = new byte[512];
 		}
 
+		/* S E N D  C O M M A N D */
+		/*----------------------------------------------------------------------------
+			%%Function: SendCommand
+			%%Qualified: bg._bg:DevComm.SendCommand
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		void SendCommand(string s)
 		{
 			byte []rgb = new byte[Encoding.ASCII.GetByteCount(s)];
@@ -4328,15 +2606,23 @@ public class _bg : System.Windows.Forms.Form
 		private byte[] rgbRxBuffer;
 		private uint ibRxBuffer = 0;
 		private ASCII[] rgbRxTerm = { ASCII.CR, ASCII.LF };
-		private ASCII[] TxTerm;
-		private ASCII[] RxFilter;
+//		private ASCII[] TxTerm;
+//		private ASCII[] RxFilter;
 		private string RxString = "";
 		private ManualResetEvent TransFlag = new ManualResetEvent(true);
 
-		private uint TransTimeout;
+//		private uint TransTimeout;
 		int ibRxTermWaiting = 0;
 		ArrayList pls = new ArrayList();
 
+		/* O N  R X  L I N E */
+		/*----------------------------------------------------------------------------
+			%%Function: OnRxLine
+			%%Qualified: bg._bg:DevComm.OnRxLine
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		void OnRxLine(string s)
 		{
 			lock(pls)
@@ -4345,6 +2631,14 @@ public class _bg : System.Windows.Forms.Form
 				}
 		}
 
+		/* O N  R X  C H A R */
+		/*----------------------------------------------------------------------------
+			%%Function: OnRxChar
+			%%Qualified: bg._bg:DevComm.OnRxChar
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		protected override void OnRxChar(byte ch) 
 		{
 			ASCII ca = (ASCII)ch;
@@ -4394,6 +2688,14 @@ public class _bg : System.Windows.Forms.Form
 				}
 		}
 
+		/* G E T  R E A D I N G S */
+		/*----------------------------------------------------------------------------
+			%%Function: GetReadings
+			%%Qualified: bg._bg:DevComm.GetReadings
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		public ArrayList GetReadings()
 		{
 			// actually read the data
@@ -4448,6 +2750,14 @@ public class _bg : System.Windows.Forms.Form
 			return plsFinal;
 		}
 
+		/* C H E C K  D E V I C E */
+		/*----------------------------------------------------------------------------
+			%%Function: CheckDevice
+			%%Qualified: bg._bg:DevComm.CheckDevice
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		public bool CheckDevice()
 		{
 			SendCommand("DM");
@@ -4469,12 +2779,28 @@ public class _bg : System.Windows.Forms.Form
 			return true;
 		}
 
+		/* C L O S E  D E V I C E */
+		/*----------------------------------------------------------------------------
+			%%Function: CloseDevice
+			%%Qualified: bg._bg:DevComm.CloseDevice
+			%%Contact: rlittle
+
+			
+		----------------------------------------------------------------------------*/
 		public void CloseDevice()
 		{
 			this.Close();
 		}
 	}
 
+	/* G E T  R E A D I N G S  F R O M  D E V I C E */
+	/*----------------------------------------------------------------------------
+		%%Function: GetReadingsFromDevice
+		%%Qualified: bg._bg.GetReadingsFromDevice
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	ArrayList GetReadingsFromDevice()
 	{
 		ArrayList pls = new ArrayList();
@@ -4490,6 +2816,14 @@ public class _bg : System.Windows.Forms.Form
 		return pls;
 	}
 
+	/* S  G E T  N E X T  Q U O T E D  F I E L D */
+	/*----------------------------------------------------------------------------
+		%%Function: SGetNextQuotedField
+		%%Qualified: bg._bg.SGetNextQuotedField
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	string SGetNextQuotedField(string s, int iFirst, out int iNext)
 	{
 		int ib;
@@ -4511,6 +2845,14 @@ public class _bg : System.Windows.Forms.Form
 		return sRet;
 	}
 
+	/* R E A D  F R O M  D E V I C E */
+	/*----------------------------------------------------------------------------
+		%%Function: ReadFromDevice
+		%%Qualified: bg._bg.ReadFromDevice
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private void ReadFromDevice(object sender, System.EventArgs e) 
 	{
 		ArrayList pls = GetReadingsFromDeviceReal();
@@ -4527,12 +2869,23 @@ public class _bg : System.Windows.Forms.Form
 			string sTime = SGetNextQuotedField(s, iFirst = iNext, out iNext);
 			string sReading = SGetNextQuotedField(s, iFirst = iNext, out iNext);
 
-			BGE bge = new BGE(sDate, sTime, BGE.ReadingType.New, Int32.Parse(sReading), 0, "");
+			if (sReading.Substring(0,1) == "C")
+				continue;
+
+			BGE bge = new BGE(sDate, sTime, BGE.ReadingType.New, Int32.Parse(sReading), 0, "", "");
 
 			AddEntryCore(bge, true);
 			}
 	}
 
+	/* G E T  R E A D I N G S  F R O M  D E V I C E  R E A L */
+	/*----------------------------------------------------------------------------
+		%%Function: GetReadingsFromDeviceReal
+		%%Qualified: bg._bg.GetReadingsFromDeviceReal
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
 	private ArrayList GetReadingsFromDeviceReal() 
 	{
 		DevComm devComm = new DevComm();
@@ -4569,11 +2922,6 @@ public class _bg : System.Windows.Forms.Form
 		devComm.CloseDevice();
 		return pls;
 	}
-
-	private void groupBox5_Enter(object sender, System.EventArgs e) {
-	
-	}
-
 
 
 }}

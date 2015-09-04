@@ -7,8 +7,8 @@ using System.Runtime.InteropServices;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
 using Microsoft.Win32;
-using AxSHDocVw;
-using MSHTML;
+//using AxSHDocVw;
+//using MSHTML;
 
 using UWin32;
 
@@ -332,6 +332,7 @@ namespace bg
 			m_gp.nIntervals = nBgIntervals;
 			m_gp.fShowMeals = fShowMeals;
 			m_gp.fLandscape = fLandscape;
+			m_gp.fGraphAvg = true; // false;
 			SetPbBounds(m_picbUpper);
 			SetPbBounds(m_picbLower);
 			AutosizeGraph(m_bvUpper, m_bvLower, (GraphicBox)m_picbUpper.Tag, (GraphicBox)m_picbLower.Tag, ref m_gp);
@@ -475,7 +476,7 @@ namespace bg
 				Grapher grph = (Grapher)pb.Tag;
 				int iFirstQuarter = -1;
 
-				grph.SetFirstQuarter(iFirstQuarter = sbh.Value);
+				grph.SetFirstFromScroll(iFirstQuarter = sbh.Value);
 
 				DateTime dttm = grph.GetFirstDateTime();
 
@@ -902,17 +903,17 @@ namespace bg
 
 				if (iFirstQuarter >= 0)
 					{
-					grph.SetFirstQuarter(iFirstQuarter);
+					grph.SetFirstFromScroll(iFirstQuarter);
 					sbh.Value = iFirstQuarter;
 					}
 				else
 					{
 					grph.SetFirstDateTime(dttm.AddDays(-1.0));
-					if (grph.GetFirstQuarter() > sbh.Maximum)	 // if we have exceeded the scrolling regions, then we want to act as if we've scrolled to the end
-						grph.SetFirstQuarter(sbh.Value);
-					if (grph.GetFirstQuarter() < 0)
-						grph.SetFirstQuarter(0);
-					sbh.Value = grph.GetFirstQuarter();
+					if (grph.GetFirstForScroll() > sbh.Maximum)	 // if we have exceeded the scrolling regions, then we want to act as if we've scrolled to the end
+						grph.SetFirstFromScroll(sbh.Value);
+					if (grph.GetFirstForScroll() < 0)
+						grph.SetFirstFromScroll(0);
+					sbh.Value = grph.GetFirstForScroll();
 					}
 				}
 			pb.Invalidate();

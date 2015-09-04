@@ -41,6 +41,13 @@ namespace bg
 			int nHours = bge.MinutesSinceCarbs / 60;
 			int nMinutes = bge.MinutesSinceCarbs - nHours * 60;
 			s += "\nTime Since Carbs: " + nHours.ToString() + ":" + nMinutes.ToString("0#");
+			if (bge.Carbs > 0)
+				s += "\nCarbs: " + bge.Carbs.ToString();
+
+			if (bge.InterpReading)
+				s += "\n**** INTERPOLATED ****";
+			else if (bge.Comment.Length > 0)
+				s += "\nComment: " + bge.Comment;
 
 			m_sTip = s;
 

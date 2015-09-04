@@ -410,7 +410,7 @@ public class Reporter : GraphicBox
 		m_nWidth = rcfDrawing.Width; // nWidth;
 		m_cgp.dBgLow = 30.0;
 		m_cgp.dBgHigh = 220.0;
-		m_cgp.nDays = 7;
+		m_cgp.nHalfDays = 14;
 		m_cgp.nIntervals = 19;
 		m_cgp.fShowMeals = false;
 
@@ -543,9 +543,9 @@ public class Reporter : GraphicBox
 		%%Contact: rlittle
 
 	----------------------------------------------------------------------------*/
-	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
+	public void SetDataPoints(object oData, VScrollBar sbv, HScrollBar sbh)
 	{
-		m_slbge = slbge;
+		m_slbge = (SortedList)oData;
 
 		// figure out how many lines we're going to have...
 		// get the first entry and the last
@@ -900,6 +900,8 @@ public class Reporter : GraphicBox
 
 		for (iLine = m_iLineFirst, iLineMax = Math.Min(m_iLineFirst + m_nLinesPerPage, m_nLines); iLine < iLineMax; iLine++)
 			{
+			if (iLine >= m_plrld.Count)
+				break;
 			PaintLine(gr, (RLD)m_plrld[iLine], iLinePainting++);
 			}
 	}

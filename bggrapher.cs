@@ -30,9 +30,41 @@ class SBGE // Set of BGE
 	float m_dxAdjust = 0;
 	HScrollBar m_sbh;
 	bool m_fColor = true;
+	bool m_fNoCurves = false;
 
+	object m_oTag;
+
+	float m_dzaLineWidth = 1.0f;
 	float m_dxOffset;
 	float m_dyOffset;
+
+	bool m_fMealLegend = false;
+	DateTime m_dttmMeal;
+
+	public void SetProps(GrapherParams cgp)
+	{
+		m_cgp = cgp;
+	}
+
+	public void SetMealLegend(DateTime dttmMeal)
+	{
+		m_dttmMeal = dttmMeal;
+		m_fMealLegend = true;
+	}
+
+	public void SetNoCurves()
+	{
+		m_fNoCurves = true;
+	}
+
+	public void SetLineWidth(float dza)
+	{
+		m_dzaLineWidth = dza;
+	}
+
+	public RectangleF RectF { get { return m_rcfDrawing; } }
+
+	public object Tag { get { return m_oTag; }  set { m_oTag = value; } }
 
 	public SBGE(GrapherParams cgp, Graphics gr, bool fWgtAvg)
 	{
@@ -43,6 +75,17 @@ class SBGE // Set of BGE
 
 		m_dxOffset = gr.MeasureString("0000", font).Width;
 		m_dyOffset = gr.MeasureString("0\n0\n0\n0\n", font).Height;
+	}
+
+	public SBGE(GrapherParams cgp, float dxOffset, float dyOffset, bool fWgtAvg)
+	{
+		m_cgp = cgp;
+		m_fWgtAvg = fWgtAvg;
+
+		Font font = new Font("Tahoma", 8);
+
+		m_dxOffset = dxOffset;
+		m_dyOffset = dyOffset;
 	}
 
 	public void SetColor(bool fColor)
@@ -176,13 +219,13 @@ class SBGE // Set of BGE
 	{
 		m_rcfDrawing = rcf;
 
-		// graph the points in the dataset, m_cgp.nDays at a time
+		// graph the points in the dataset, m_cgp.nHalfDays at a time
 		BGE bge = (BGE)m_slbge.GetByIndex(0);
 		DateTime dayFirst = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
 
 		// split apart the graphing range into intervals, by the quarter hour
 
-		double cxQuarters = m_cgp.nDays * 24 * 4;
+		double cxQuarters = m_cgp.nHalfDays * 12 * 4;
 		double dxQuarter = (rcf.Width - m_dxOffset / 2) / cxQuarters;
 
 		double cyBg = m_cgp.dBgHigh - m_cgp.dBgLow;
@@ -224,7 +267,7 @@ class SBGE // Set of BGE
 			if (dxMax > dxQuarter * cxQuarters)
 				{
 				m_sbh.Minimum = 0;
-				m_sbh.Maximum = (int)(((dxMax / dxQuarter)) - (m_cgp.nDays * 24 * 4));
+				m_sbh.Maximum = (int)(((dxMax / dxQuarter)) - (m_cgp.nHalfDays * 12 * 4));
 				m_sbh.Visible = true;
 				}
 			else
@@ -242,30 +285,25 @@ class SBGE // Set of BGE
 		// ------------------------------
 		// FIRST:  Draw the shaded ranges
 		// ------------------------------
-		int dxAdjust = (int)(m_iFirstQuarter * m_dxQuarter);	// how much should 0 based x-coordinates be adjusted?
+
+		// how much should 0 based x-coordinates be adjusted?
+		int dxAdjust = (int)(m_iFirstQuarter * m_dxQuarter);
 
 		PTFI ptfi = (PTFI)m_plptfi[0];
 		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
 
-//		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_dxLeftMargin, 
-//													   m_dyTopMargin, // m_dyOffset + 
-//													   ((float)m_rcfDrawing.Width) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
-
 		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_rcfDrawing.Left, 
-													   m_rcfDrawing.Top, // m_dyOffset + 
+													   m_rcfDrawing.Top,
 													   m_rcfDrawing.Width - m_dxOffset,
 													   m_rcfDrawing.Height - m_dyOffset); 
-//													   ((float)m_rcfDrawing.Width) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
 
-		RectangleF rectfGraphFullClip = m_rcfDrawing; // new RectangleF(m_dxLeftMargin, 
-//													   m_dyTopMargin, 
-//													   ((float)m_rcfDrawing.Width) - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyTopMargin - m_dyBottomMargin);
-//		
+		RectangleF rectfGraphFullClip = m_rcfDrawing;
 		gr.SetClip(rectfGraphBodyClip);
-		ShadeCurvedRanges(gr, dxAdjust, dttmFirst);
+		if (m_fNoCurves)
+			ShadeRanges(gr);
+		else
+			ShadeCurvedRanges(gr, dxAdjust, dttmFirst);
+
 		gr.ResetClip();
 
 		// -----------------------------------------
@@ -281,6 +319,7 @@ class SBGE // Set of BGE
 		Pen penBlue = new Pen(Color.Blue, (float)1);
 		Pen penGrid = new Pen(Color.DarkGray, (float)1);
 		Pen penLightGrid = new Pen(Color.LightGray, (float)1);
+		Pen penLight2Grid = new Pen(Color.LightBlue, (float)1);
 
 		gr.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
 
@@ -290,7 +329,7 @@ class SBGE // Set of BGE
 		// figure out the number of quarters in the first date we want
 		// to display
 
-		int nDayFirst = (m_iFirstQuarter + 95) / (4 * 24) - 1;
+		int nDayFirst = (m_iFirstQuarter) / (4 * 24) - 1;
 		Font font = new Font("Tahoma", 8);
 		// now we know (rounded up), what the first day will be
 		// as a delta from the first day
@@ -301,13 +340,27 @@ class SBGE // Set of BGE
 		float xMacLastDrawn = 0.0F;
 		float xMacNoonLastDrawn = 0.0F;
 
-		for (int nDay = nDayFirst; nDay <= nDayFirst + m_cgp.nDays; nDay++)
+		Font fontSmall = new Font("Tahoma", 6);
+
+		// figure out how many other gridlines we should draw
+		// secondary gridlines must be at least wide enough to accommodate
+		// the legend on every other gridline.
+		float dxGrid2Legend = gr.MeasureString("23:59", fontSmall).Width;
+		int nQuartersGrid2 = (int)(dxGrid2Legend / m_dxQuarter);
+
+		// make sure its evenly divisble into 48 (12 * 4)
+		if (nQuartersGrid2 > 48)
+			nQuartersGrid2 = 48;
+
+		while (48 % nQuartersGrid2 != 0)
+			nQuartersGrid2++;
+
+		for (int nDay = nDayFirst; nDay <= nDayFirst + m_cgp.nHalfDays / 2; nDay++)
 			{
 			dttm = dttm.AddDays(1);
 			string s = dttm.ToString("MM/dd");
 			SizeF szf = gr.MeasureString(s, font);
 			float x = XFromDate(dttmFirst, dttm, m_dxQuarter) - dxAdjust;
-
 
 			if (x > m_rcfDrawing.Left + m_dxOffset)
 				gr.DrawLine(penLightGrid, x, yDateLegend + dyOffsetRegion, x, 0);
@@ -315,12 +368,11 @@ class SBGE // Set of BGE
 			if (x + (float)m_dxQuarter * (4.0F * 12.0F) > m_rcfDrawing.Left + m_dxOffset)
 				gr.DrawLine(penGrid, x + (float)m_dxQuarter * (4.0F * 12.0F), yDateLegend + dyOffsetRegion, x + (float)m_dxQuarter * (4.0F * 12.0F), 0);
 
-			Font fontSmall = new Font("Tahoma", 6);
 
-			float dxNoon = gr.MeasureString("12:00pm", fontSmall).Width;
+			float dxNoon = gr.MeasureString("12:00", fontSmall).Width;
 			if (xMacNoonLastDrawn < x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F)
 				{
-				gr.DrawString("12:00pm", fontSmall, brushBlue, x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F, yDateLegend + dyOffsetRegion / 2.2F);
+				gr.DrawString("12:00", fontSmall, brushBlue, x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F, yDateLegend + dyOffsetRegion / 1.5F);
 				xMacNoonLastDrawn = x + (float)m_dxQuarter * (4.0F * 12.0F) + dxNoon / 2.0F;
 				}
 			x -= (szf.Width / 2.0F);
@@ -329,6 +381,35 @@ class SBGE // Set of BGE
 				gr.DrawString(s, font, brushBlue, x, yDateLegend + dyOffsetRegion);
 				xMacLastDrawn = x + gr.MeasureString(s, font).Width;
 				}
+
+			bool fText = false;
+
+			for (int nGrid2 = 0; nGrid2 < 24 * 4; nGrid2 += nQuartersGrid2)
+				{
+				if (nGrid2 != 12 * 4)
+					{
+					x = XFromDate(dttmFirst, dttm.AddMinutes(nGrid2 * 15), m_dxQuarter) - dxAdjust;
+
+					if (x > m_rcfDrawing.Left + m_dxOffset)
+						{
+						gr.DrawLine(penLight2Grid, x, yDateLegend + dyOffsetRegion, x, 0);
+
+						if (fText)
+							{
+							int nHour = nGrid2 / 4;
+							int nMinute = (nGrid2 % 4) * 15;
+							
+							string sText = nHour.ToString() + ":" + nMinute.ToString("0#");
+							float dxText = gr.MeasureString(sText, fontSmall).Width;
+							
+							x -= dxText / 2.0F;
+
+							gr.DrawString(sText, fontSmall, brushBlue, x, yDateLegend + dyOffsetRegion / 4.0f);
+							}
+						}
+					}
+				fText = !fText;
+				}
 			}
 
 		// put legend up
@@ -336,9 +417,7 @@ class SBGE // Set of BGE
 		int dn = ((int)m_cgp.dBgHigh - (int)m_cgp.dBgLow) / m_cgp.nIntervals;
 
 		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, m_rcfDrawing.Top, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend);
-		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend, m_rcfDrawing.Width + m_dxOffset, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, m_dyTopMargin, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend, m_rcfDrawing.Width, yDateLegend);
+		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend, m_rcfDrawing.Width + (m_rcfDrawing.Left) - 1.0F + m_dxOffset, yDateLegend);
 		bool fLine = false;
 
 		for (n = (int)m_cgp.dBgLow; n <= (int)m_cgp.dBgHigh; n += dn)
@@ -347,11 +426,11 @@ class SBGE // Set of BGE
 			float y = YFromReading(n, m_dyPerBgUnit);
 
 			if (fLine)
-				gr.DrawLine(penGrid, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F, y, m_rcfDrawing.Width, y);
+				gr.DrawLine(penGrid, (m_dxOffset + m_rcfDrawing.Left) - 4.0F, y, (m_dxOffset + m_rcfDrawing.Left) + m_rcfDrawing.Width, y);
 			fLine = !fLine;
 
 			y -= (gr.MeasureString(n.ToString(), font).Height / 2.0F);
-			x = (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F - gr.MeasureString(n.ToString(), font).Width;
+			x = (m_dxOffset + m_rcfDrawing.Left) - 4.0F - gr.MeasureString(n.ToString(), font).Width;
 			gr.DrawString(n.ToString(), font, brushBlue, x, y);
 			}
 
@@ -366,7 +445,7 @@ class SBGE // Set of BGE
 
 		int dxAdjust = (int)(m_iFirstQuarter * m_dxQuarter);	// how much should 0 based x-coordinates be adjusted?
 
-		Pen penMeal = new Pen(Color.Green, 1.0F);
+		Pen penMeal = new Pen(Color.Green, m_dzaLineWidth);
 		Pen penBlueThin = new Pen(Color.LightBlue, (float)0.5);
 		Pen penBlue = new Pen(Color.Blue, (float)1);
 		Pen penGrid = new Pen(Color.DarkGray, (float)1);
@@ -381,7 +460,7 @@ class SBGE // Set of BGE
 			}
 
 		double dxFirstQuarter = m_iFirstQuarter * m_dxQuarter + (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/);
-		double dxLastQuarter = dxFirstQuarter + (m_cgp.nDays * 24 * 4) * m_dxQuarter;
+		double dxLastQuarter = dxFirstQuarter + (m_cgp.nHalfDays * 12 * 4) * m_dxQuarter;
 
 		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_rcfDrawing.Left, 
 													   m_rcfDrawing.Top, // m_dyOffset + 
@@ -439,9 +518,9 @@ class SBGE // Set of BGE
 						yAdjust += 15.0F;
 
 					// we have a match
-					gr.DrawLine(penMeal, xLast + 1, yLast, xLast + 1, yLast + yAdjust);
-					gr.DrawLine(penMeal, xLast + 1, yLast + yAdjust, ptf.X + 1 - dxAdjust, yLast + yAdjust);
-					gr.DrawLine(penMeal, ptf.X + 1 - dxAdjust, yLast + yAdjust, ptf.X + 1 - dxAdjust, ptf.Y + 1);
+					gr.DrawLine(penMeal, xLast + m_dzaLineWidth, yLast, xLast + m_dzaLineWidth, yLast + yAdjust);
+					gr.DrawLine(penMeal, xLast + m_dzaLineWidth, yLast + yAdjust, ptf.X + m_dzaLineWidth - dxAdjust, yLast + yAdjust);
+					gr.DrawLine(penMeal, ptf.X + m_dzaLineWidth - dxAdjust, yLast + yAdjust, ptf.X + m_dzaLineWidth - dxAdjust, ptf.Y + m_dzaLineWidth);
 					ptfiLastMeal.bge = null;
 					}
 				else if (ptfiLastMeal.bge.Date.AddHours(150.0) < ptfi.bge.Date)
@@ -455,9 +534,9 @@ class SBGE // Set of BGE
 				break;
 
 			if (ptfi.bge.InterpReading)
-				gr.DrawEllipse(penBlueThin, ptf.X - 1 - dxAdjust, ptf.Y - 1, 4, 4);
+				gr.DrawEllipse(penBlueThin, ptf.X - m_dzaLineWidth - dxAdjust, ptf.Y - m_dzaLineWidth, m_dzaLineWidth * 4.0f, m_dzaLineWidth * 4.0f);
 			else
-				gr.FillEllipse(brushBlue, ptf.X - 1 - dxAdjust, ptf.Y - 1, 4, 4);
+				gr.FillEllipse(brushBlue, ptf.X - m_dzaLineWidth - dxAdjust, ptf.Y - m_dzaLineWidth, m_dzaLineWidth * 4.0f, m_dzaLineWidth * 4.0f);
 
 			if (i > 0)
 				{
@@ -520,7 +599,7 @@ class SBGE // Set of BGE
 			}
 
 		AddCurvePoint(24.0, 0, ref dHours, ref plptf, dxAdjust, dttmFirst, ref dttmCur, 0, 130, 0, nPctAbove);
-		for (; iDay < m_cgp.nDays + 2; iDay++)
+		for (; iDay < m_cgp.nHalfDays / 2 + 2; iDay++)
 			{
 			// now, first analyze the day and determine when the meals are...otherwise, use the default meal times
 			dMeals[0] = 8.0;
@@ -695,14 +774,7 @@ public class Grapher : GraphicBox
 //	|  | |___ |  | |__] |___ |  \      \/  |  | |  \ | |  | |__] |___ |___ ___]
 
 	RectangleF m_rcfDrawing;
-//	SortedList m_slbge;
 	GrapherParams m_cgp;
-
-//	ArrayList m_plptfi;
-//	ArrayList m_plptfiAvg;
-
-	float m_dxOffset = 30.0F;
-	float m_dyOffset = 45.0F;
 
 	SBGE m_sbge;
 	SBGE m_sbgeAvg;
@@ -719,13 +791,9 @@ public class Grapher : GraphicBox
 		m_rcfDrawing = rcf;
 		m_cgp.dBgLow = 30.0;
 		m_cgp.dBgHigh = 220.0;
-		m_cgp.nDays = 7;
+		m_cgp.nHalfDays = 14;
 		m_cgp.nIntervals = 19;
 		m_cgp.fShowMeals = false;
-		Font font = new Font("Tahoma", 8);
-
-		m_dxOffset = gr.MeasureString("0000", font).Width;
-		m_dyOffset = gr.MeasureString("0\n0\n0\n0\n", font).Height;
 
 		m_sbge = new SBGE(m_cgp, gr, false);
 		m_sbgeAvg = new SBGE(m_cgp, gr, true);
@@ -742,7 +810,7 @@ public class Grapher : GraphicBox
 	----------------------------------------------------------------------------*/
 	public int GetDaysPerPage()
 	{
-		return m_cgp.nDays;
+		return m_cgp.nHalfDays / 2;
 	}
 
 	/* S E T  D A Y S  P E R  P A G E */
@@ -755,7 +823,7 @@ public class Grapher : GraphicBox
 	----------------------------------------------------------------------------*/
 	public void SetDaysPerPage(int nDaysPerPage)
 	{
-		m_cgp.nDays = nDaysPerPage;
+		m_cgp.nHalfDays = nDaysPerPage * 2;
 	}
 
 	/* S E T  F I R S T  F R O M  S C R O L L */
@@ -842,10 +910,10 @@ public class Grapher : GraphicBox
 
 		GraphicBox interface
 	----------------------------------------------------------------------------*/
-	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
+	public void SetDataPoints(object oData, VScrollBar sbv, HScrollBar sbh)
 	{
-		m_sbge.SetDataSet(slbge, sbh);
-		m_sbgeAvg.SetDataSet(slbge, sbh);
+		m_sbge.SetDataSet((SortedList)oData, sbh);
+		m_sbgeAvg.SetDataSet((SortedList)oData, sbh);
 	}
 
 	/* S E T  P R O P S */
@@ -859,6 +927,8 @@ public class Grapher : GraphicBox
 	public void SetProps(GrapherParams cgp)
 	{
 		m_cgp = cgp;
+		m_sbge.SetProps(cgp);
+		m_sbgeAvg.SetProps(cgp);
 	}
 
 	/* C A L C */
@@ -873,69 +943,6 @@ public class Grapher : GraphicBox
 	{
 		m_sbge.CalcGraph(m_rcfDrawing);
 		m_sbgeAvg.CalcGraph(m_rcfDrawing);
-#if NEVER
-		// graph the points in the dataset, m_cgp.nDays at a time
-		BGE bge = (BGE)m_slbge.GetByIndex(0);
-		DateTime dayFirst = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
-
-		// split apart the graphing range into intervals, by the quarter hour
-
-		double cxQuarters = m_cgp.nDays * 24 * 4;
-		double dxQuarter = (m_rcfDrawing.Width - m_dxOffset / 2) / cxQuarters; // (m_rcfDrawing.Width - (m_dxOffset + m_dxLeftMargin + m_dxRightMargin) - m_dxOffset / 2) / cxQuarters;
-
-		double cyBg = m_cgp.dBgHigh - m_cgp.dBgLow;
-		double dyBg = (m_rcfDrawing.Height - m_dyOffset) / cyBg;// (m_rcfDrawing.Height - (m_dyOffset + m_dyTopMargin + m_dyBottomMargin)) / cyBg;
-
-		// build up a set of points to graph
-		int iValue = 0;
-		m_plptfi = new ArrayList();
-		m_plptfiAvg = new ArrayList();
-		float dxMax = 0;
-
-		while (iValue < m_slbge.Values.Count)
-			{
-			bge = (BGE)m_slbge.GetByIndex(iValue);
-
-			// set a point at bge
-
-			PointF ptf = PtfFromBge(dayFirst, bge, dxQuarter, dyBg);
-			PointF ptfAvg = PtfFromBgeAvg(dayFirst, bge, dxQuarter, dyBg);
-
-			if (ptf.X > dxMax)
-				dxMax = ptf.X;
-
-			PTFI ptfi;
-			PTFI ptfiAvg;
-
-			ptfi.ptf = ptf;
-			ptfi.bge = bge;
-
-			ptfiAvg.ptf = ptfAvg;
-			ptfiAvg.bge = bge;
-
-			m_plptfi.Add(ptfi);
-			m_plptfiAvg.Add(ptfiAvg);
-
-			iValue++;
-			}
-
-		if (m_sbh != null)
-			{
-			if (dxMax > dxQuarter * cxQuarters)
-				{
-				m_sbh.Minimum = 0;
-				m_sbh.Maximum = (int)(((dxMax / dxQuarter)) - (m_cgp.nDays * 24 * 4));
-				m_sbh.Visible = true;
-				}
-			else
-				{
-				m_sbh.Visible = false;
-				}
-			}
-
-		m_dyPerBgUnit = dyBg;
-		m_dxQuarter = dxQuarter;
-#endif // NEVER
 	}
 
 	//	___  ____ _ _  _ ___ _ _  _ ____
@@ -976,242 +983,6 @@ public class Grapher : GraphicBox
 		m_sbge.PaintGraph(gr);
 		m_sbgeAvg.PaintGraph(gr);
 
-#if NEVER
-		// ------------------------------
-		// FIRST:  Draw the shaded ranges
-		// ------------------------------
-		int dxAdjust = (int)(m_iFirstQuarter * m_dxQuarter);	// how much should 0 based x-coordinates be adjusted?
-		PTFI ptfi = (PTFI)m_plptfi[0];
-		PTFI ptfiAvg = (PTFI)m_plptfiAvg[0];
-		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
-
-//		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_dxLeftMargin, 
-//													   m_dyTopMargin, // m_dyOffset + 
-//													   ((float)m_rcfDrawing.Width) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
-
-		RectangleF rectfGraphBodyClip = new RectangleF(m_dxOffset + m_rcfDrawing.Left, 
-													   m_rcfDrawing.Top, // m_dyOffset + 
-													   m_rcfDrawing.Width - m_dxOffset,
-													   m_rcfDrawing.Height - m_dyOffset); 
-//													   ((float)m_rcfDrawing.Width) - m_dxOffset - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyOffset - m_dyTopMargin - m_dyBottomMargin);
-
-		RectangleF rectfGraphFullClip = m_rcfDrawing; // new RectangleF(m_dxLeftMargin, 
-//													   m_dyTopMargin, 
-//													   ((float)m_rcfDrawing.Width) - m_dxLeftMargin - m_dxRightMargin, 
-//													   ((float)m_rcfDrawing.Height) - m_dyTopMargin - m_dyBottomMargin);
-//		
-		gr.SetClip(rectfGraphBodyClip);
-		ShadeCurvedRanges(gr, dxAdjust, dttmFirst);
-		gr.ResetClip();
-
-		// -----------------------------------------
-		// SECOND: Draw the gridlines and the legend
-		// -----------------------------------------
-
-		gr.SetClip(rectfGraphFullClip);
-
-		SolidBrush brushBlue = new SolidBrush(Color.Blue);
-		SolidBrush brushAvg = new SolidBrush(Color.Red);
-
-		Pen penAvg = new Pen(Color.Red, (float)1);
-		Pen penBlueThin = new Pen(Color.LightBlue, (float)0.5);
-		Pen penBlue = new Pen(Color.Blue, (float)1);
-		Pen penGrid = new Pen(Color.DarkGray, (float)1);
-		Pen penLightGrid = new Pen(Color.LightGray, (float)1);
-		Pen penMeal = new Pen(Color.Green, 1.0F);
-
-		double dxFirstQuarter = m_iFirstQuarter * m_dxQuarter + (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/);
-		double dxLastQuarter = dxFirstQuarter + (m_cgp.nDays * 24 * 4) * m_dxQuarter;
-
-		gr.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-		// now we've found the first index we're going to draw
-		DateTime dttm = DateTime.Parse(dttmFirst.ToString("d"));
-
-		// figure out the number of quarters in the first date we want
-		// to display
-
-		int nDayFirst = (m_iFirstQuarter + 95) / (4 * 24) - 1;
-		Font font = new Font("Tahoma", 8);
-		// now we know (rounded up), what the first day will be
-		// as a delta from the first day
-		dttm = dttm.AddDays(nDayFirst);
-		
-		float dyOffsetRegion = m_dyOffset / 4;
-		float yDateLegend = m_rcfDrawing.Bottom - m_dyOffset + dyOffsetRegion * 1.3F; // m_rcfDrawing.Height - m_dyBottomMargin - m_dyOffset + dyOffsetRegion * 1.3F;
-		float xMacLastDrawn = 0.0F;
-		float xMacNoonLastDrawn = 0.0F;
-
-		for (int nDay = nDayFirst; nDay <= nDayFirst + m_cgp.nDays; nDay++)
-			{
-			dttm = dttm.AddDays(1);
-			string s = dttm.ToString("MM/dd");
-			SizeF szf = gr.MeasureString(s, font);
-			float x = XFromDate(dttmFirst, dttm, m_dxQuarter) - dxAdjust;
-
-
-			if (x > m_rcfDrawing.Left + m_dxOffset)
-				gr.DrawLine(penLightGrid, x, yDateLegend + dyOffsetRegion, x, 0);
-
-			if (x + (float)m_dxQuarter * (4.0F * 12.0F) > m_rcfDrawing.Left + m_dxOffset)
-				gr.DrawLine(penGrid, x + (float)m_dxQuarter * (4.0F * 12.0F), yDateLegend + dyOffsetRegion, x + (float)m_dxQuarter * (4.0F * 12.0F), 0);
-
-			Font fontSmall = new Font("Tahoma", 6);
-
-			float dxNoon = gr.MeasureString("12:00pm", fontSmall).Width;
-			if (xMacNoonLastDrawn < x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F)
-				{
-				gr.DrawString("12:00pm", fontSmall, brushBlue, x + (float)m_dxQuarter * (4.0F * 12.0F) - dxNoon / 2.0F, yDateLegend + dyOffsetRegion / 2.2F);
-				xMacNoonLastDrawn = x + (float)m_dxQuarter * (4.0F * 12.0F) + dxNoon / 2.0F;
-				}
-			x -= (szf.Width / 2.0F);
-			if (xMacLastDrawn < x)
-				{
-				gr.DrawString(s, font, brushBlue, x, yDateLegend + dyOffsetRegion);
-				xMacLastDrawn = x + gr.MeasureString(s, font).Width;
-				}
-			}
-
-		int i, iLast;
-
-		// put legend up
-		int n;
-		int dn = ((int)m_cgp.dBgHigh - (int)m_cgp.dBgLow) / m_cgp.nIntervals;
-
-		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, m_rcfDrawing.Top, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend);
-		gr.DrawLine(penBlue, m_dxOffset + (m_rcfDrawing.Left) - 1.0F, yDateLegend, m_rcfDrawing.Width + m_dxOffset, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, m_dyTopMargin, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend);
-//		gr.DrawLine(penBlue, (m_dxOffset + m_dxLeftMargin) - 1.0F, yDateLegend, m_rcfDrawing.Width, yDateLegend);
-		bool fLine = false;
-
-		for (n = (int)m_cgp.dBgLow; n <= (int)m_cgp.dBgHigh; n += dn)
-			{
-			float x = m_rcfDrawing.Left /*m_dxLeftMargin*/ + 2.0F;
-			float y = YFromReading(n, m_dyPerBgUnit);
-
-			if (fLine)
-				gr.DrawLine(penGrid, (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F, y, m_rcfDrawing.Width, y);
-			fLine = !fLine;
-
-			y -= (gr.MeasureString(n.ToString(), font).Height / 2.0F);
-			x = (m_dxOffset + m_rcfDrawing.Left/*m_dxLeftMargin*/) - 4.0F - gr.MeasureString(n.ToString(), font).Width;
-			gr.DrawString(n.ToString(), font, brushBlue, x, y);
-			}
-
-		gr.ResetClip();
-
-		gr.SetClip(rectfGraphBodyClip);
-		// ------------------------------
-		// THIRD: Graph the points
-		// ------------------------------
-
-		PTFI ptfiLastMeal = new PTFI();
-
-		ptfiLastMeal.bge = null;
-
-		for (i = 0, iLast = m_plptfi.Count; i < iLast; i++)
-			{
-			PointF ptf;
-			PointF ptfAvg;
-
-			ptfi = ((PTFI)m_plptfi[i]);
-			ptf = ptfi.ptf;
-
-			ptfiAvg = ((PTFI)m_plptfiAvg[i]);
-			ptfAvg = ptfiAvg.ptf;
-
-			// if its before our first point, skip it
-			if (ptf.X < dxFirstQuarter)
-				continue;
-
-			if (ptf.Y == -1.0F && ptfi.bge.Reading == 0)
-				{
-				// lets get a real Y value for this by plotting a line on the curve
-				if (i > 0)
-					ptf.Y = ((PTFI)m_plptfi[i-1]).ptf.Y;
-				else if (i < iLast)
-					ptf.Y = ((PTFI)m_plptfi[i+1]).ptf.Y;
-				else
-					ptf.Y = 0;
-				ptfi.ptf = ptf;
-				m_plptfi[i] = ptfi;
-				}
-
-			if (ptfAvg.Y == -1.0F && ptfiAvg.bge.WgtAvg == 0)
-				{
-				// lets get a real Y value for this by plotting a line on the curve
-				if (i > 0)
-					ptfAvg.Y = ((PTFI)m_plptfiAvg[i-1]).ptf.Y;
-				else if (i < iLast)
-					ptfAvg.Y = ((PTFI)m_plptfiAvg[i+1]).ptf.Y;
-				else
-					ptfAvg.Y = 0;
-				ptfiAvg.ptf = ptf;
-				m_plptfiAvg[i] = ptfiAvg;
-				}
-
-			if (ptfiLastMeal.bge != null && m_cgp.fShowMeals)
-				{
-				if (ptfiLastMeal.bge.Date.AddMinutes(90.0) <= ptfi.bge.Date
-					&& ptfiLastMeal.bge.Date.AddMinutes(150.0) >= ptfi.bge.Date)
-					{
-					float yAdjust;
-					float xLast = ptfiLastMeal.ptf.X - dxAdjust;
-					float yLast = ptfiLastMeal.ptf.Y;
-
-					yAdjust = ptf.Y - yLast;
-
-					if (yAdjust < 0.0F)
-						yAdjust -= 15.0F;
-					else
-						yAdjust += 15.0F;
-
-					// we have a match
-					gr.DrawLine(penMeal, xLast + 1, yLast, xLast + 1, yLast + yAdjust);
-					gr.DrawLine(penMeal, xLast + 1, yLast + yAdjust, ptf.X + 1 - dxAdjust, yLast + yAdjust);
-					gr.DrawLine(penMeal, ptf.X + 1 - dxAdjust, yLast + yAdjust, ptf.X + 1 - dxAdjust, ptf.Y + 1);
-					ptfiLastMeal.bge = null;
-					}
-				else if (ptfiLastMeal.bge.Date.AddHours(150.0) < ptfi.bge.Date)
-					ptfiLastMeal.bge = null;
-				}
-
-			if (ptfi.bge.Type != BGE.ReadingType.SpotTest)
-				ptfiLastMeal = ptfi;
-
-			if (ptf.X > dxLastQuarter)
-				break;
-
-			if (ptfi.bge.InterpReading)
-                gr.DrawEllipse(penBlueThin, ptf.X - 1 - dxAdjust, ptf.Y - 1, 4, 4);
-			else
-				gr.FillEllipse(brushBlue, ptf.X - 1 - dxAdjust, ptf.Y - 1, 4, 4);
-
-			if (m_cgp.fGraphAvg)
-				gr.FillEllipse(brushAvg, ptfAvg.X - 1 - dxAdjust, ptfAvg.Y - 1, 4, 4);
-
-			if (i > 0)
-				{
-				PointF ptfLast = ((PTFI)m_plptfi[i - 1]).ptf;
-
-				if (ptfLast.X >= dxFirstQuarter)
-					gr.DrawLine(penBlue,  ptfLast.X + 1 - dxAdjust, ptfLast.Y + 1, ptf.X + 1 - dxAdjust, ptf.Y + 1);
-
-				if (m_cgp.fGraphAvg)
-					{
-					ptfLast = ((PTFI)m_plptfiAvg[i - 1]).ptf;
-
-					if (ptfLast.X >= dxFirstQuarter)
-						gr.DrawLine(penAvg,  ptfLast.X + 1 - dxAdjust, ptfLast.Y + 1, ptfAvg.X + 1 - dxAdjust, ptfAvg.Y + 1);
-					}
-				}
-			}
-		// if we were doing the translucent range shading, we'd do it here.
-//			ShadeRanges(pb, gr);
-		gr.ResetClip();
-#endif // NEVER
 	}
 
 
@@ -1229,10 +1000,10 @@ public class Grapher : GraphicBox
 
 		dttm = GetFirstDateTime();
 
-		if (dttm.AddDays(m_cgp.nDays) > dttmLast)
+		if (dttm.AddHours(m_cgp.nHalfDays * 12) > dttmLast)
 			return false;
 
-		dttm = dttm.AddDays(m_cgp.nDays);
+		dttm = dttm.AddHours(m_cgp.nHalfDays * 12);
 		return true;
 	}
 

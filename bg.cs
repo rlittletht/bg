@@ -13,6 +13,7 @@ using UWin32;
 using System.Threading;
 using System.Text;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace bg
 {
@@ -111,6 +112,11 @@ public class BGE // BG Entry
 	}
 
 
+	override public string ToString()
+	{
+		return String.Format("{0}: {1}={2} [{3}]", m_dttm.ToString("s"), StringFromReadingType(m_type), m_nBg, this.FullComment);
+	}
+
 	/* B  G  E */
 	/*----------------------------------------------------------------------------
 		%%Function: BGE
@@ -129,14 +135,33 @@ public class BGE // BG Entry
 		m_sMeal = sMeal;
 		m_fInterp = false;
 	}
-	
+
+	public BGE(BGE bge)
+	{
+		m_dttm = bge.m_dttm;
+		m_nBg = bge.m_nBg;
+		m_type = bge.m_type;
+		m_nCarbs = bge.m_nCarbs;
+		m_sComment = bge.m_sComment;
+		m_sMeal = bge.m_sMeal;
+		m_fInterp = bge.m_fInterp;
+		m_nMinutesSinceLastCarb = bge.m_nMinutesSinceLastCarb;
+		m_nCarbsInLast4Hours = bge.m_nCarbsInLast4Hours;
+		m_nWgtAvg = bge.m_nWgtAvg;
+	}
+
+	public BGE Clone()
+	{
+		return new BGE(this);
+	}
+
 	public int 			Carbs 				{ get { return m_nCarbs; }  				set { m_nCarbs = value; } }
 	public int 			MinutesSinceCarbs 	{ get { return m_nMinutesSinceLastCarb; }  	set { m_nMinutesSinceLastCarb = value; } }
 	public int 			CarbsIn4 			{ get { return m_nCarbsInLast4Hours; }  	set { m_nCarbsInLast4Hours = value; } }
 	public string 		Comment				{ get { return m_sComment; }                set { m_sComment = value; } }
 	public string 		Meal				{ get { return m_sMeal; }                   set { m_sMeal = value; } }
 	public ReadingType 	Type				{ get { return m_type; }                    set { m_type = value; } }
-	public DateTime 	Date				{ get { return m_dttm; } }
+	public DateTime 	Date				{ get { return m_dttm; } 					set { m_dttm = value; } }
 	public int 			Reading				{ get { return m_nBg; } }
 	public bool			InterpReading		{ get { return m_fInterp; }					set { m_fInterp = value; } }
 	public int 			WgtAvg				{ get { return m_nWgtAvg; } 				set { m_nWgtAvg = value; } }
@@ -222,7 +247,7 @@ public struct PTFI
 
 public struct GrapherParams
 {
-	public int nDays;
+	public int nHalfDays;
 	public int nIntervals;
 	public bool fShowMeals;
 	public double dBgLow;
@@ -241,7 +266,7 @@ public interface GraphicBox
 	void SetFirstFromScroll(int i);
 	void Calc();
 	bool FHitTest(Point pt, out object oHit, out RectangleF rectfHit);
-	void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh);
+	void SetDataPoints(object oData, VScrollBar sbv, HScrollBar sbh);
 	void SetProps(GrapherParams gp);
 	int GetFirstForScroll();
 	void SetColor(bool fColor);
@@ -252,6 +277,264 @@ public interface GraphicBox
 	bool FGetLastDateTimeOnPage(out DateTime dttm);
 }
 
+
+class MP // Meal Profile
+{
+	public enum MPT : int
+	{
+		Hour0 = 0,
+		Hour1 = 1,
+		Hour2 = 2,
+		Hour4 = 3,
+		PostMeal = 4,	// anything > 1.5H and < 3H
+		Morning = 5,	// the next morning, if this was a dinner
+		Last = Morning
+	}
+
+	int []m_mpmptcMeals;
+	int []m_mpmptnMealSum;
+
+	string m_sDescription;
+
+	ArrayList m_plslbgeMeals;
+	ArrayList m_pldttmMeals;
+
+	public MP()
+	{
+		m_mpmptcMeals = new int[(int)MPT.Morning + 1];
+		m_mpmptnMealSum = new int[(int)MPT.Morning + 1];
+
+		m_plslbgeMeals = new ArrayList();
+	}
+
+	public string SGetDescription()
+	{
+		return m_sDescription;
+	}
+
+	public int NGetSampleSize()
+	{
+		// every entry in mpmptnMeals should be the same except for
+		// (possibly) mptMorning -- that is only valid if the meal
+		// was a dinner, so a particular meal could have occured
+		// at dinner and also at non-dinner...
+		return m_mpmptcMeals[0];
+	}
+
+	public int NGetAvgForMpt(MPT mpt)
+	{
+		if (m_mpmptcMeals[(int)mpt] == 0)
+			return 0;
+
+		return m_mpmptnMealSum[(int)mpt] / m_mpmptcMeals[(int)mpt];
+	}
+
+
+	public SortedList SlbgeForSample(int n)
+	{
+		return (SortedList)m_plslbgeMeals[n];
+	}
+
+	public DateTime DttmMealForSample(int n)
+	{
+		return (DateTime)m_pldttmMeals[n];
+	}
+
+
+	/* N O R M A L I Z E  M E A L S */
+	/*----------------------------------------------------------------------------
+		%%Function: NormalizeMeals
+		%%Qualified: bg.MP.NormalizeMeals
+		%%Contact: rlittle
+
+		Make all the meals start at the same time
+	----------------------------------------------------------------------------*/
+	public void NormalizeMeals()
+	{
+		TimeSpan tsMeal = new TimeSpan(0,0,0,0);
+		ArrayList plbgeMeal = new ArrayList();
+
+		m_pldttmMeals = new ArrayList();
+
+		// figure out the largest delta between the first meal and the 
+		// first reading (pre meal)
+		foreach (SortedList slbge in m_plslbgeMeals)
+			{
+			DateTime dttmFirst = ((BGE)slbge.GetByIndex(0)).Date;
+			DateTime dttmMeal = dttmFirst;
+			bool fFound = false;
+
+			foreach (BGE bge in slbge.Values)
+				{
+				if (bge.Carbs > 0)
+					{
+					dttmMeal = bge.Date;
+					plbgeMeal.Add(bge);
+					fFound = true;
+					break;
+					}
+				}
+
+			if (!fFound)
+				throw(new Exception("NormalizeMeals could not find a meal!"));
+
+			if (tsMeal < dttmMeal - dttmFirst)
+				tsMeal = dttmMeal - dttmFirst;
+			}  
+		// ok, make all meals occur at 0:00 + ts.
+
+		int iMeal = 0;
+		foreach (SortedList slbge in m_plslbgeMeals)
+			{
+			BGE bgeMeal = (BGE)plbgeMeal[iMeal];
+			
+			TimeSpan tsAdjust = bgeMeal.Date.Subtract(tsMeal) - new DateTime(2003,1,1);
+
+			DateTime dttmMeal = new DateTime(2003,1,1).Add(tsMeal);
+			m_pldttmMeals.Add(dttmMeal);
+
+			foreach(BGE bge in slbge.Values)
+				bge.Date = bge.Date.Subtract(tsAdjust);
+			iMeal++;
+			}
+#if VERBOSE
+#if DEBUG
+		Debug.WriteLine("Normalizing");
+		iMeal = 0;
+
+		foreach (SortedList slbge in m_plslbgeMeals)
+			{
+			BGE bgeMeal = (BGE)plbgeMeal[iMeal];
+			Debug.Write(String.Format("BGE({0}", iMeal));
+
+			foreach(BGE bge in slbge.Values)
+				{
+				Debug.Write(String.Format(" -- {0}({1})", bge.Date.ToString("s"), bge.Carbs));
+				if (bge.Carbs > 0)
+					break;
+				}
+			Debug.WriteLine(".");
+			}
+
+#endif // DEBUG
+#endif // VERBOSE
+	}
+
+	int NGetForDttm(SortedList slbge, BGE bgeRef, DateTime dttmNext, double dMinToleranceBack, double dMinToleranceForward)
+	{
+		int iFirst = 0;
+		int iKey = 0;
+		BGE bge = null;
+
+		iKey = iFirst = slbge.IndexOfKey(bgeRef.Key);
+
+		for ( ; iFirst >= 0; iFirst--)
+			{
+			bge = (BGE)slbge.GetByIndex(iFirst);
+
+			if (bge.Reading <= 0
+				|| bge.Type == BGE.ReadingType.Control)
+				{
+				continue;
+				}
+
+			if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
+				&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
+				{
+				return bge.Reading;
+				}
+
+			if (bge.Date < dttmNext.AddMinutes(-dMinToleranceBack))
+				break;
+			}
+
+		// no luck finding it going back; now look going forward
+		for (iFirst = iKey; iFirst < slbge.Count; iFirst++)
+			{
+			bge = (BGE)slbge.GetByIndex(iFirst);
+
+			if (bge.Reading <= 0
+				|| bge.Type == BGE.ReadingType.Control)
+				{
+				continue;
+				}
+
+			if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
+				&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
+				{
+				return bge.Reading;
+				}
+
+			if (bge.Date> dttmNext.AddMinutes(dMinToleranceForward))
+				break;
+			}
+
+		return 0;
+	}
+
+	/* A D D  M E A L */
+	/*----------------------------------------------------------------------------
+		%%Function: AddMeal
+		%%Qualified: bg._bg:MP.AddMeal
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	public void AddMeal(SortedList slbge, SortedList slbgeRef, BGE bgeMeal)
+	{
+		if (m_sDescription == null)
+			m_sDescription = bgeMeal.Meal;
+
+		m_plslbgeMeals.Add(slbge);
+
+		int n;
+
+		n = NGetForDttm(slbgeRef, bgeMeal, bgeMeal.Date, 90.0, 0.0);
+		if (n != 0)
+			{
+			m_mpmptnMealSum[(int)MPT.Hour0] += n;
+			m_mpmptcMeals[(int)MPT.Hour0]++;
+			}
+
+		n = NGetForDttm(slbgeRef, bgeMeal, bgeMeal.Date.AddMinutes(60), 15.0, 15.0);
+		if (n != 0)
+			{
+			m_mpmptnMealSum[(int)MPT.Hour1] += n;
+			m_mpmptcMeals[(int)MPT.Hour1]++;
+			}
+
+		n = NGetForDttm(slbgeRef, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 30.0);
+		if (n != 0)
+			{
+			m_mpmptnMealSum[(int)MPT.Hour2] += n;
+			m_mpmptcMeals[(int)MPT.Hour2]++;
+			}
+
+		n = NGetForDttm(slbgeRef, bgeMeal, bgeMeal.Date.AddMinutes(240), 50.0, 50.0);
+		if (n != 0)
+			{
+			m_mpmptnMealSum[(int)MPT.Hour4] += n;
+			m_mpmptcMeals[(int)MPT.Hour4]++;
+			}
+
+		n = NGetForDttm(slbgeRef, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 45.0);
+		if (n != 0)
+			{
+			m_mpmptnMealSum[(int)MPT.PostMeal] += n;
+			m_mpmptcMeals[(int)MPT.PostMeal]++;
+			}
+
+		if (bgeMeal.Type == BGE.ReadingType.Dinner)
+			{
+			// look for the following mornings first reading
+			n = NGetForDttm(slbgeRef, bgeMeal, new DateTime(bgeMeal.Date.Year, bgeMeal.Date.Month, bgeMeal.Date.Day).AddDays(1.0).AddHours(5.0), 0.0, 240.0);
+			if (n != 0)
+				{
+				m_mpmptnMealSum[(int)MPT.Morning] += n;
+				m_mpmptcMeals[(int)MPT.Morning]++;
+				}
+			}
+	}
+};
 
 public class ListViewItemComparer : IComparer
 {
@@ -418,6 +701,18 @@ public class _bg : System.Windows.Forms.Form
 	private SortedList m_slsMeals;
 	private System.Windows.Forms.Label label20;
 	private System.Windows.Forms.ComboBox m_cbxMeal;
+	private System.Windows.Forms.TabPage m_tabMealCharts;
+	private System.Windows.Forms.ComboBox m_cbxSearch;
+	private System.Windows.Forms.Label label21;
+	private System.Windows.Forms.ListView m_lvMeals;
+	private System.Windows.Forms.Button m_pbDoMealChart;
+	private System.Windows.Forms.Button m_pbSearch;
+	private System.Windows.Forms.CheckBox m_cbRegEx;
+	private System.Windows.Forms.Label label22;
+	private System.Windows.Forms.Button m_pbClear;
+	private System.Windows.Forms.MainMenu mainMenu1;
+	private System.Windows.Forms.MenuItem m_mnuFile;
+	private System.Windows.Forms.MenuItem m_mnuiFindSuspect;
 
 	/// <summary>
 	/// Required designer variable.
@@ -437,6 +732,7 @@ public class _bg : System.Windows.Forms.Form
 		m_cbxUpper.SelectedIndex = 1;
 		m_cbxLower.SelectedIndex = 0;
 		SetupListView(m_lvHistory);
+		SetupListViewSearch(m_lvMeals);
 		SetupListViewStats(m_lvStats);
 		LoadBgData();
 
@@ -525,9 +821,22 @@ public class _bg : System.Windows.Forms.Form
 		this.m_cbBreakfast = new System.Windows.Forms.CheckBox();
 		this.m_cbSpot = new System.Windows.Forms.CheckBox();
 		this.m_pbGraph = new System.Windows.Forms.Button();
+		this.m_tabMealCharts = new System.Windows.Forms.TabPage();
+		this.m_pbClear = new System.Windows.Forms.Button();
+		this.label22 = new System.Windows.Forms.Label();
+		this.m_cbRegEx = new System.Windows.Forms.CheckBox();
+		this.m_pbSearch = new System.Windows.Forms.Button();
+		this.m_pbDoMealChart = new System.Windows.Forms.Button();
+		this.m_lvMeals = new System.Windows.Forms.ListView();
+		this.label21 = new System.Windows.Forms.Label();
+		this.m_cbxSearch = new System.Windows.Forms.ComboBox();
+		this.mainMenu1 = new System.Windows.Forms.MainMenu();
+		this.m_mnuFile = new System.Windows.Forms.MenuItem();
+		this.m_mnuiFindSuspect = new System.Windows.Forms.MenuItem();
 		this.m_tabc.SuspendLayout();
 		this.m_tabEntry.SuspendLayout();
 		this.m_tabAnalysis.SuspendLayout();
+		this.m_tabMealCharts.SuspendLayout();
 		this.SuspendLayout();
 		// 
 		// m_tabc
@@ -537,7 +846,8 @@ public class _bg : System.Windows.Forms.Form
 			| System.Windows.Forms.AnchorStyles.Right);
 		this.m_tabc.Controls.AddRange(new System.Windows.Forms.Control[] {
 																			 this.m_tabEntry,
-																			 this.m_tabAnalysis});
+																			 this.m_tabAnalysis,
+																			 this.m_tabMealCharts});
 		this.m_tabc.Location = new System.Drawing.Point(16, 24);
 		this.m_tabc.Name = "m_tabc";
 		this.m_tabc.SelectedIndex = 0;
@@ -1099,17 +1409,121 @@ public class _bg : System.Windows.Forms.Form
 		this.m_pbGraph.Text = "&Generate";
 		this.m_pbGraph.Click += new System.EventHandler(this.DoGraph);
 		// 
+		// m_tabMealCharts
+		// 
+		this.m_tabMealCharts.Controls.AddRange(new System.Windows.Forms.Control[] {
+																					  this.m_pbClear,
+																					  this.label22,
+																					  this.m_cbRegEx,
+																					  this.m_pbSearch,
+																					  this.m_pbDoMealChart,
+																					  this.m_lvMeals,
+																					  this.label21,
+																					  this.m_cbxSearch});
+		this.m_tabMealCharts.Location = new System.Drawing.Point(4, 22);
+		this.m_tabMealCharts.Name = "m_tabMealCharts";
+		this.m_tabMealCharts.Size = new System.Drawing.Size(512, 502);
+		this.m_tabMealCharts.TabIndex = 2;
+		this.m_tabMealCharts.Text = "Meal Charts";
+		// 
+		// m_pbClear
+		// 
+		this.m_pbClear.Location = new System.Drawing.Point(440, 80);
+		this.m_pbClear.Name = "m_pbClear";
+		this.m_pbClear.Size = new System.Drawing.Size(72, 24);
+		this.m_pbClear.TabIndex = 7;
+		this.m_pbClear.Text = "Clear";
+		this.m_pbClear.Click += new System.EventHandler(this.ClearSearch);
+		// 
+		// label22
+		// 
+		this.label22.Location = new System.Drawing.Point(8, 32);
+		this.label22.Name = "label22";
+		this.label22.Size = new System.Drawing.Size(496, 23);
+		this.label22.TabIndex = 6;
+		this.label22.Text = "Meal Searching";
+		// 
+		// m_cbRegEx
+		// 
+		this.m_cbRegEx.Location = new System.Drawing.Point(8, 56);
+		this.m_cbRegEx.Name = "m_cbRegEx";
+		this.m_cbRegEx.Size = new System.Drawing.Size(152, 16);
+		this.m_cbRegEx.TabIndex = 5;
+		this.m_cbRegEx.Text = "Use Regular Expressions";
+		// 
+		// m_pbSearch
+		// 
+		this.m_pbSearch.Location = new System.Drawing.Point(440, 56);
+		this.m_pbSearch.Name = "m_pbSearch";
+		this.m_pbSearch.Size = new System.Drawing.Size(72, 24);
+		this.m_pbSearch.TabIndex = 4;
+		this.m_pbSearch.Text = "Search";
+		this.m_pbSearch.Click += new System.EventHandler(this.DoMealSearch);
+		// 
+		// m_pbDoMealChart
+		// 
+		this.m_pbDoMealChart.Location = new System.Drawing.Point(440, 8);
+		this.m_pbDoMealChart.Name = "m_pbDoMealChart";
+		this.m_pbDoMealChart.Size = new System.Drawing.Size(72, 24);
+		this.m_pbDoMealChart.TabIndex = 3;
+		this.m_pbDoMealChart.Text = "&Generate";
+		this.m_pbDoMealChart.Click += new System.EventHandler(this.GenerateMealChart);
+		// 
+		// m_lvMeals
+		// 
+		this.m_lvMeals.Location = new System.Drawing.Point(16, 112);
+		this.m_lvMeals.Name = "m_lvMeals";
+		this.m_lvMeals.Size = new System.Drawing.Size(472, 368);
+		this.m_lvMeals.TabIndex = 2;
+		// 
+		// label21
+		// 
+		this.label21.Location = new System.Drawing.Point(8, 80);
+		this.label21.Name = "label21";
+		this.label21.Size = new System.Drawing.Size(56, 24);
+		this.label21.TabIndex = 1;
+		this.label21.Text = "Search";
+		// 
+		// m_cbxSearch
+		// 
+		this.m_cbxSearch.Location = new System.Drawing.Point(64, 77);
+		this.m_cbxSearch.Name = "m_cbxSearch";
+		this.m_cbxSearch.Size = new System.Drawing.Size(368, 21);
+		this.m_cbxSearch.Sorted = true;
+		this.m_cbxSearch.TabIndex = 0;
+		this.m_cbxSearch.Text = "Penne Puttanesca";
+		// 
+		// mainMenu1
+		// 
+		this.mainMenu1.MenuItems.AddRange(new System.Windows.Forms.MenuItem[] {
+																				  this.m_mnuFile});
+		// 
+		// m_mnuFile
+		// 
+		this.m_mnuFile.Index = 0;
+		this.m_mnuFile.MenuItems.AddRange(new System.Windows.Forms.MenuItem[] {
+																				  this.m_mnuiFindSuspect});
+		this.m_mnuFile.Text = "&File";
+		// 
+		// m_mnuiFindSuspect
+		// 
+		this.m_mnuiFindSuspect.Index = 0;
+		this.m_mnuiFindSuspect.Text = "Find Suspect Readings";
+		this.m_mnuiFindSuspect.Click += new System.EventHandler(this.FindSuspectReadings);
+		// 
 		// _bg
 		// 
 		this.AutoScaleBaseSize = new System.Drawing.Size(5, 13);
 		this.ClientSize = new System.Drawing.Size(544, 574);
 		this.Controls.AddRange(new System.Windows.Forms.Control[] {
 																	  this.m_tabc});
+		this.Menu = this.mainMenu1;
 		this.Name = "_bg";
 		this.Text = "bgGraph";
 		this.m_tabc.ResumeLayout(false);
 		this.m_tabEntry.ResumeLayout(false);
 		this.m_tabAnalysis.ResumeLayout(false);
+		this.m_tabMealCharts.ResumeLayout(false);
 		this.ResumeLayout(false);
 
 	}
@@ -1167,6 +1581,36 @@ public class _bg : System.Windows.Forms.Form
 		AddBge(null);
 	}
 
+	void SetupListViewSearch(ListView lv)
+	{
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[0].Text = "Group";
+		lv.Columns[0].Width = 32;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[1].Text = "Date";
+		lv.Columns[1].Width = 128;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[2].Text = "Carbs";
+		lv.Columns[2].Width = 48;
+		lv.Columns[2].TextAlign = HorizontalAlignment.Right;
+
+		lv.Columns.Add(new ColumnHeader());
+		lv.Columns[3].Text = "Comment";
+		lv.Columns[3].Width = 256;
+
+		lv.Columns[0].Width = 32;
+
+		lv.FullRowSelect = true;
+		lv.MultiSelect = false;
+		lv.View = View.Details;
+
+//		m_lvHistory.ListViewItemSorter = new ListViewItemComparer(0);
+//		m_lvHistory.ColumnClick += new ColumnClickEventHandler(HandleColumn);
+//		AddBge(null);
+	}
+
 	/* S E T U P  L I S T  V I E W  S T A T S */
 	/*----------------------------------------------------------------------------
 		%%Function: SetupListViewStats
@@ -1220,6 +1664,13 @@ public class _bg : System.Windows.Forms.Form
 		m_slsMeals = new SortedList();
 	}
 
+	void AddMeal(string sMeal)
+	{
+		m_slsMeals.Add(sMeal, sMeal);
+		m_cbxMeal.Items.Add(sMeal);
+		m_cbxSearch.Items.Add(sMeal);
+	}
+
 	/* L O A D  B G  D A T A */
 	/*----------------------------------------------------------------------------
 		%%Function: LoadBgData
@@ -1252,28 +1703,77 @@ public class _bg : System.Windows.Forms.Form
 				int nBg, nCarbs;
 				BGE.ReadingType type;
 
-				sDate = nodeT.SelectSingleNode("b:date", nsmgr).InnerText;
-				sTime = nodeT.SelectSingleNode("b:time", nsmgr).InnerText;
-				sType = nodeT.SelectSingleNode("@type").Value;
-				try
-				{
-					sComment = nodeT.SelectSingleNode("b:comment", nsmgr).InnerText;
-				} catch { sComment = ""; };
+				int iChild = 0;
 
-				try
-				{
-					sMeal = nodeT.SelectSingleNode("b:meal", nsmgr).InnerText;
-				} catch { sMeal = ""; };
+				sDate = nodeT.ChildNodes[iChild++].InnerText;
+				sTime = nodeT.ChildNodes[iChild++].InnerText;
+				nBg = 0;
+				nCarbs = 0;
 
-				try
-				{
-					nCarbs = Int32.Parse(nodeT.SelectSingleNode("b:carbs", nsmgr).InnerText);
-				} catch { nCarbs = 0; };
+				if (iChild < nodeT.ChildNodes.Count
+					&& String.Compare(nodeT.ChildNodes[iChild].LocalName, "bg") == 0)
+					{
+					string sBg = nodeT.ChildNodes[iChild].InnerText;
 
-				try
-				{
-					nBg = Int32.Parse(nodeT.SelectSingleNode("b:bg", nsmgr).InnerText);
-				} catch { nBg = 0; }
+					if (sBg.Length > 0)
+						nBg = Int32.Parse(sBg);
+
+					iChild++;
+					}
+
+				if (iChild < nodeT.ChildNodes.Count
+					&& String.Compare(nodeT.ChildNodes[iChild].LocalName, "carbs") == 0)
+					{
+					string sCarbs = nodeT.ChildNodes[iChild].InnerText;
+
+					if (sCarbs.Length > 0)
+						nCarbs = Int32.Parse(sCarbs);
+
+					iChild++;
+					}
+
+				if (iChild < nodeT.ChildNodes.Count
+					&& String.Compare(nodeT.ChildNodes[iChild].LocalName, "comment") == 0)
+					{
+					sComment = nodeT.ChildNodes[iChild].InnerText;
+					iChild++;
+					}
+				else
+					{
+					sComment = "";
+					}
+
+				if (iChild < nodeT.ChildNodes.Count
+					&& String.Compare(nodeT.ChildNodes[iChild].LocalName, "meal") == 0)
+					{
+					sMeal = nodeT.ChildNodes[iChild].InnerText;
+					iChild++;
+					}
+				else
+					{
+					sMeal = "";
+					}
+
+				sType = nodeT.Attributes.GetNamedItem("type", "").Value;
+
+//				sDate = nodeT.SelectSingleNode("b:date", nsmgr).InnerText;
+//				sTime = nodeT.SelectSingleNode("b:time", nsmgr).InnerText;
+//				sType = nodeT.SelectSingleNode("@type").Value;
+//				try
+//				{
+//					sComment = nodeT.SelectSingleNode("b:comment", nsmgr).InnerText;
+//				} catch { sComment = ""; };
+
+//				try
+//				{
+//					sMeal = nodeT.SelectSingleNode("b:meal", nsmgr).InnerText;
+//				} catch { sMeal = ""; };
+
+//				try
+//				{
+//					nCarbs = Int32.Parse(nodeT.SelectSingleNode("b:carbs", nsmgr).InnerText);
+//				} catch { nCarbs = 0; };
+
 				type = BGE.ReadingTypeFromString(sType);
 				
 				bge = new BGE(sDate, sTime, type, nBg, nCarbs, sComment, sMeal);
@@ -1289,8 +1789,7 @@ public class _bg : System.Windows.Forms.Form
 				{
 				if (bge.Meal.Length > 0)
 					{
-					m_slsMeals.Add(bge.Meal, bge.Meal);
-					m_cbxMeal.Items.Add(bge.Meal);
+					AddMeal(bge.Meal);
 					}
 				}
 			catch 
@@ -1353,6 +1852,16 @@ public class _bg : System.Windows.Forms.Form
 			lvi.BackColor = Color.Yellow;
 		m_lvHistory.Items.Add(lvi);
 		UpdateBge(bge, lvi);
+	}
+
+	ListViewItem LviFindBge(BGE bge)
+	{
+		foreach (ListViewItem lviT in m_lvHistory.Items)
+			{
+			if (((BGE)lviT.Tag) == bge)
+				return lviT;
+			}
+		return null;
 	}
 
 	/* A D D  E N T R Y  C O R E */
@@ -1490,8 +1999,7 @@ public class _bg : System.Windows.Forms.Form
 				{
 				if (bge.Meal.Length > 0)
 					{
-					m_slsMeals.Add(bge.Meal, bge.Meal);
-					m_cbxMeal.Items.Add(bge.Meal);
+					AddMeal(bge.Meal);
 					}
 				}
 			catch 
@@ -1500,14 +2008,8 @@ public class _bg : System.Windows.Forms.Form
 
 			if (bgeCurrent != m_bgeCurrent)
 				{
-				foreach (ListViewItem lviT in m_lvHistory.Items)
-					{
-					if (((BGE)lviT.Tag) == bgeCurrent)
-						{
-						lvi = lviT;
-						break;
-						}
-					}
+				lvi = LviFindBge(bgeCurrent);
+
 				if (lvi == null)
 					MessageBox.Show("Couldn't find matching LVI for BGE");
 				}
@@ -1919,158 +2421,6 @@ public class _bg : System.Windows.Forms.Form
 
 	};
 
-	class MP // Meal Profile
-	{
-		public enum MPT : int
-		{
-			Hour0 = 0,
-			Hour1 = 1,
-			Hour2 = 2,
-			Hour4 = 3,
-			PostMeal = 4,	// anything > 1.5H and < 3H
-			Morning = 5,	// the next morning, if this was a dinner
-			Last = Morning
-		}
-
-		int []m_mpmptcMeals;
-		int []m_mpmptnMealSum;
-
-		ArrayList m_plslbeMeals;
-
-		public MP()
-		{
-			m_mpmptcMeals = new int[(int)MPT.Morning];
-			m_mpmptnMealSum = new int[(int)MPT.Morning];
-
-			m_plslbeMeals = new ArrayList();
-		}
-
-		public int NGetSampleSize()
-		{
-			// every entry in mpmptnMeals should be the same except for
-			// (possibly) mptMorning -- that is only valid if the meal
-			// was a dinner, so a particular meal could have occured
-			// at dinner and also at non-dinner...
-			return m_mpmptcMeals[0];
-		}
-
-		public int NGetAvgForMpt(MPT mpt)
-		{
-			return m_mpmptnMealSum[(int)mpt] / m_mpmptcMeals[(int)mpt];
-		}
-
-		int NGetForDttm(SortedList slbge, BGE bgeRef, DateTime dttmNext, double dMinToleranceBack, double dMinToleranceForward)
-		{
-			int iFirst = 0;
-			int iKey = 0;
-			BGE bge = null;
-
-			iKey = iFirst = slbge.IndexOfKey(bgeRef.Key);
-
-			for ( ; iFirst >= 0; iFirst--)
-				{
-				bge = (BGE)slbge.GetByIndex(iFirst);
-
-				if (bge.Reading <= 0
-					|| bge.Type == BGE.ReadingType.Control)
-					{
-					continue;
-					}
-
-				if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
-					&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
-					{
-					return bge.Reading;
-					}
-
-				if (bge.Date < dttmNext.AddMinutes(-dMinToleranceBack))
-					break;
-				}
-
-			// no luck finding it going back; now look going forward
-			for (iFirst = iKey; iFirst < slbge.Count; iFirst++)
-				{
-				bge = (BGE)slbge.GetByIndex(iFirst);
-
-				if (bge.Reading <= 0
-					|| bge.Type == BGE.ReadingType.Control)
-					{
-					continue;
-					}
-
-				if (bge.Date >= dttmNext.AddMinutes(-dMinToleranceBack)
-					&& bge.Date <= dttmNext.AddMinutes(dMinToleranceForward))
-					{
-					return bge.Reading;
-					}
-
-				if (bge.Date> dttmNext.AddMinutes(dMinToleranceForward))
-					break;
-				}
-
-			return 0;
-		}
-
-		/* A D D  M E A L */
-		/*----------------------------------------------------------------------------
-			%%Function: AddMeal
-			%%Qualified: bg._bg:MP.AddMeal
-			%%Contact: rlittle
-
-		----------------------------------------------------------------------------*/
-		public void AddMeal(SortedList slbge, BGE bgeMeal)
-		{
-			m_plslbeMeals.Add(slbge);
-
-			int n;
-
-			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date, 90.0, 0.0);
-			if (n != 0)
-				{
-				m_mpmptnMealSum[(int)MPT.Hour0] += n;
-				m_mpmptcMeals[(int)MPT.Hour0]++;
-				}
-
-			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(60), 15.0, 15.0);
-			if (n != 0)
-				{
-				m_mpmptnMealSum[(int)MPT.Hour1] += n;
-				m_mpmptcMeals[(int)MPT.Hour1]++;
-				}
-
-			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 30.0);
-			if (n != 0)
-				{
-				m_mpmptnMealSum[(int)MPT.Hour2] += n;
-				m_mpmptcMeals[(int)MPT.Hour2]++;
-				}
-
-			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(240), 50.0, 50.0);
-			if (n != 0)
-				{
-				m_mpmptnMealSum[(int)MPT.Hour4] += n;
-				m_mpmptcMeals[(int)MPT.Hour4]++;
-				}
-
-			n = NGetForDttm(slbge, bgeMeal, bgeMeal.Date.AddMinutes(120), 30.0, 45.0);
-			if (n != 0)
-				{
-				m_mpmptnMealSum[(int)MPT.PostMeal] += n;
-				m_mpmptcMeals[(int)MPT.PostMeal]++;
-				}
-
-			if (bgeMeal.Type == BGE.ReadingType.Dinner)
-				{
-				// look for the following mornings first reading
-				n = NGetForDttm(slbge, bgeMeal, new DateTime(bgeMeal.Date.Year, bgeMeal.Date.Month, bgeMeal.Date.Day).AddDays(1.0).AddHours(5.0), 0.0, 240.0);
-				if (n != 0)
-					{
-					m_mpmptnMealSum[(int)MPT.Morning] += n;
-					m_mpmptcMeals[(int)MPT.Morning]++;
-					}
-				}
-		}
-	};
 
 	SortedList m_slbgeStats;
 	struct II // Interpolated Item
@@ -2106,9 +2456,9 @@ public class _bg : System.Windows.Forms.Form
 		%%Contact: rlittle
 
 	----------------------------------------------------------------------------*/
-	void AddInterpolatedBge(SortedList slbge, DateTime dttmEst, int nEst)
+	void AddInterpolatedBge(SortedList slbge, DateTime dttmEst, int nEst, string sComment)
 	{
-		BGE bgeEst = new BGE(dttmEst.ToString("d"), dttmEst.ToString("T"), BGE.ReadingType.SpotTest, (int)nEst, 0, "interpolated", "");
+		BGE bgeEst = new BGE(dttmEst.ToString("d"), dttmEst.ToString("T"), BGE.ReadingType.SpotTest, (int)nEst, 0, "interpolated: " + sComment, "");
 		int cTries = 0;
 		bgeEst.InterpReading = true;
 
@@ -2117,10 +2467,15 @@ public class _bg : System.Windows.Forms.Form
 			try
 				{
 				slbge.Add(bgeEst.Key, bgeEst);
+//				if (bgeEst.Date.Month == 6)
+//					Debug.WriteLine(String.Format("   AddInterp {0}", bgeEst.ToString()));
 				return;	// we succeeded!
 				}
 			catch
 				{
+				dttmEst = dttmEst.AddMinutes(1.0);
+				bgeEst = new BGE(dttmEst.ToString("d"), dttmEst.ToString("T"), BGE.ReadingType.SpotTest, (int)nEst, 0, "interpolated: " + sComment, "");
+				bgeEst.InterpReading = true;
 				}
 			cTries++;
 			}
@@ -2144,6 +2499,19 @@ public class _bg : System.Windows.Forms.Form
 			{
 			BGE bge = (BGE)slbge.GetByIndex(iCur);
 			if (bge.Reading != 0 && bge.Type != BGE.ReadingType.Control)
+				return bge;
+			}
+		return new BGE("1/1/1900", "00:00", BGE.ReadingType.Control, 0, 0, "null reading", "");
+	}
+
+	BGE BgePrevEntry(SortedList slbge, int iCur)
+	{
+		// walk backwards finding the first item with a reading that isn't a
+		// control
+		while (--iCur >= 0)
+			{
+			BGE bge = (BGE)slbge.GetByIndex(iCur);
+			if (bge.Type != BGE.ReadingType.Control)
 				return bge;
 			}
 		return new BGE("1/1/1900", "00:00", BGE.ReadingType.Control, 0, 0, "null reading", "");
@@ -2174,10 +2542,15 @@ public class _bg : System.Windows.Forms.Form
 
 		// TAKE CARE not to add items before the current item without carefully
 		// accounting for it with i
-		for (i = 0; i < slbgeStats.Count; i++)
+		i = 0;
+		while (i < slbgeStats.Count)
 			{
 			BGE bge = (BGE)slbgeStats.GetByIndex(i);
 			BGE bgePrevReading = BgePrevReading(slbgeStats, i);
+			BGE bgePrevEntry = BgePrevEntry(slbgeStats, i);
+
+//			if (bge.Date.Month == 6)
+//				Debug.WriteLine(String.Format("Interp {0}", bge.ToString()));
 
 			if (bge.Type == BGE.ReadingType.Control)
 				{
@@ -2185,8 +2558,48 @@ public class _bg : System.Windows.Forms.Form
 				continue;
 				}
 
+//			if (bge.Date.Month == 6 && bge.Date.Day == 30 && bge.Date.Hour > 22)
+//				Debug.WriteLine("here!");
+
+			if (bgePrevEntry.Carbs > 0)
+				{
+				TimeSpan tsCarb = bge.Date.Subtract(bgePrevEntry.Date);
+
+				// if the reading since the carb were > 1.5 hours, we can 
+				// assume we didn't capture the spike.  use a guess of 10 bgc rise
+				// for each carb.  we will put this spike at 90 minutes postprandial
+				// (this is one of many tunable places)
+
+				if (tsCarb.TotalMinutes > 90)
+					{
+					// we are now saying that the last reading we have is 90 minutes
+					// postprandial (the one we are estimating)
+
+					// calculate an estimate as a 30bgc per carb rise
+					int nEst = bgePrevReading.Reading + bgePrevEntry.Carbs * 15;// * 30;
+					AddInterpolatedBge(slbgeStats, bgePrevEntry.Date.AddMinutes(90.0), nEst, "PostPrandial");
+
+					// now, do we have to estimate that 4 hours post prandial we go back to 
+					// what we were pre-meal?
+					if (tsCarb.TotalMinutes > 240)
+						{
+						// no reading for 4 hours past the meal -- assume we go
+						// back to the pre-reading
+						AddInterpolatedBge(slbgeStats, bgePrevEntry.Date.AddMinutes(240.0), bgePrevReading.Reading, "PostPostPrandial");
+						}
+
+					// now we want to just continue and reevaluate starting from the previous
+					// entry (essentially recursing)
+					i = slbgeStats.IndexOfKey(bgePrevReading.Key);
+					if (i < 0)
+						throw(new Exception("bgePrevReading doesn't have a key but it must!"));
+
+					continue;
+					}
+				}
+
 			// if this entry has a reading, let's decide if we can weight the entire period of time from the last entry
-			// to now, or if we need to interpolate some netries.
+			// to now, or if we need to interpolate some entries.
 			if (bge.Reading != 0)
 				{
 				// if we have a previous reading...
@@ -2194,50 +2607,35 @@ public class _bg : System.Windows.Forms.Form
 					{
 					TimeSpan ts = bge.Date.Subtract(bgePrevReading.Date);
 
-					if (bgePrevReading.Carbs > 0)
+					// if the current reading is higher than the previous, assume its
+					// .75 of the delta, for been that way for 1/2 of the time
+					if (bge.Reading > bgePrevReading.Reading && ts.TotalMinutes > 10.0) // bgePrevReading.Reading)
 						{
-						TimeSpan tsCarb = bge.Date.Subtract(bgePrevReading.Date);
+						int nEst = bgePrevReading.Reading + ((bge.Reading - bgePrevReading.Reading)* 1) / 2;
+						AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(ts.TotalMinutes * 0.75), nEst, "75% for 0.5");
 
-						// if the reading since the carb were > 1.5 hours, we can 
-						// assume we didn't capture the spike.  use a guess of 10 bgc rise
-						// for each carb.  we will put this spike at 90 minutes postprandial
-						// (this is one of many tunable places)
+						// now we want to just continue and reevaluate starting from the previous
+						// entry (essentially recursing)
+						i = slbgeStats.IndexOfKey(bgePrevReading.Key);
+						if (i < 0)
+							throw(new Exception("bgePrevReading doesn't have a key but it must!"));
 
-						if (tsCarb.TotalMinutes > 90)
-							{
-							// we are now saying that the last reading we have is the 90 minutes
-							// postprandial (the one we are estimating)
-
-							// calculate an estimate as a 30bgc per carb rise
-							int nEst = bgePrevReading.Reading + bgePrevReading.Carbs * 15;// * 30;
-							AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(90.0), nEst);
-
-							// now we want to just continue and reevaluate starting from the previous
-							// entry (essentially recursing)
-							i = slbgeStats.IndexOfKey(bgePrevReading.Key);
-							if (i < 0)
-								throw(new Exception("bgePrevReading doesn't have a key but it must!"));
-
-							continue;
-							}
+						continue;
 						}
+					if (bge.Reading < bgePrevReading.Reading && ts.TotalMinutes > 20.0) // bgePrevReading.Reading)
+						{
+						int nEst = bgePrevReading.Reading + ((bge.Reading - bgePrevReading.Reading)* 1) / 2;
+						AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(ts.TotalMinutes * 0.50), nEst, "75% for 0.5");
 
-						// if the current reading is higher than the previous, assume its
-						// been that way for 1/4 of the time
-						if (bge.Reading > bgePrevReading.Reading && ts.Minutes > 2.0) // bgePrevReading.Reading)
-							{
-							int nEst = bge.Reading;
-							AddInterpolatedBge(slbgeStats, bgePrevReading.Date.AddMinutes(ts.Minutes * 0.25), nEst);
+						// now we want to just continue and reevaluate starting from the previous
+						// entry (essentially recursing)
+						i = slbgeStats.IndexOfKey(bgePrevReading.Key);
+						if (i < 0)
+							throw(new Exception("bgePrevReading doesn't have a key but it must!"));
 
-							// now we want to just continue and reevaluate starting from the previous
-							// entry (essentially recursing)
-							i = slbgeStats.IndexOfKey(bgePrevReading.Key);
-							if (i < 0)
-								throw(new Exception("bgePrevReading doesn't have a key but it must!"));
-
-							continue;
-							}
+						continue;
 						}
+					}
 				}
 			i++;
 			}
@@ -2573,7 +2971,7 @@ public class _bg : System.Windows.Forms.Form
 		{
 			m_cbs = new CommBaseSettings();
 
-			m_cbs.SetStandard("COM3:", 9600, CommBase.Handshake.none);
+			m_cbs.SetStandard("COM5:", 9600, CommBase.Handshake.none);
 			rgbRxBuffer = new byte[512];
 		}
 
@@ -2891,17 +3289,17 @@ public class _bg : System.Windows.Forms.Form
 		DevComm devComm = new DevComm();
 
 		devComm.Init();
-		CommBase.PortStatus ps = devComm.IsPortAvailable("COM3:");
+		CommBase.PortStatus ps = devComm.IsPortAvailable("COM5:");
 
 		if (ps != CommBase.PortStatus.available)
 			{
-			MessageBox.Show("COM3 unavailable");
+			MessageBox.Show("COM1 unavailable");
 			return null;
 			}
 
 		if (!devComm.Open())
 			{
-			MessageBox.Show("COM3 unable to open");
+			MessageBox.Show("COM1 unable to open");
 			return null;
 			}
 
@@ -2921,6 +3319,185 @@ public class _bg : System.Windows.Forms.Form
 
 		devComm.CloseDevice();
 		return pls;
+	}
+
+	void AddBgeToSearch(BGE bge)
+	{
+		ListViewItem lvi = new ListViewItem();
+
+		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+
+		m_lvMeals.Items.Add(lvi);
+
+		lvi.SubItems[3].Text = bge.FullComment;
+		if (bge.Carbs != 0)
+			lvi.SubItems[2].Text = bge.Carbs.ToString();
+		lvi.SubItems[1].Text = bge.Date.ToString();
+		lvi.SubItems[0].Text = m_idGroupCur.ToString();
+		lvi.Tag = bge;
+	}
+
+	int m_idGroupCur = 0;
+
+	private void DoMealSearch(object sender, System.EventArgs e)
+	{
+		// walk through all our entries and find matches
+		Regex rx = null;
+		int c = 0;
+		m_idGroupCur++;
+		if (m_cbRegEx.Checked)
+			{
+			try
+				{
+                rx = new Regex(m_cbxSearch.Text);
+                }
+			catch (Exception exc)
+				{
+				MessageBox.Show("Could not compile Regular Expression '" + m_cbxSearch.Text + "':\n"+ exc.ToString(), "BG");
+				return;
+				}
+			}
+
+		foreach (BGE bge in m_slbge.Values)
+			{
+			if ((rx != null && rx.IsMatch(bge.Meal))
+				|| String.Compare(m_cbxSearch.Text, bge.Meal, true/*fIgnoreCase*/) == 0)
+				{
+				AddBgeToSearch(bge);
+				c++;
+				}
+			}
+		if (c == 0)
+			{
+			MessageBox.Show("The search yielded no results.", "BG");
+			}
+		else
+			{
+//			MessageBox.Show(c.ToString() + " item(s) returned and added to group 1.", "BG");
+			}
+	}
+
+	SortedList SlbgeGetMealSubset(BGE bge)
+	{
+		int iMeal = m_slbge.IndexOfKey(bge.Key);
+		int iFirst = iMeal;
+		int iLast = iMeal + 1;
+
+		while (iFirst >= 0)
+			{
+			BGE bgeT = (BGE)m_slbge.GetByIndex(iFirst);
+
+			if (bgeT.Reading != 0 && bgeT.Type != BGE.ReadingType.Control)
+				break;
+
+			iFirst--;
+			}
+
+		if (iFirst == -1)
+			return null;
+
+		while (iLast < m_slbge.Count)
+			{
+			BGE bgeT = (BGE)m_slbge.GetByIndex(iLast);
+
+			if (bgeT.Carbs > 0)
+				break;
+			iLast++;
+			}
+
+		if (iLast == m_slbge.Count)
+			iLast--;
+
+		SortedList slbge = new SortedList();
+
+		for ( ; iFirst <= iLast; iFirst++)
+			{
+			BGE bgeT = (BGE)m_slbge.GetByIndex(iFirst);
+
+			slbge.Add(bgeT.Key, bgeT.Clone());
+			}
+
+		return slbge;
+	}
+
+	private void GenerateMealChart(object sender, System.EventArgs e) 
+	{
+		ArrayList plmp = new ArrayList();
+
+		// let's walk through the list of meals and build an array of
+		// meal profiles for each group
+
+		MP mp = new MP();
+		int nGroup = -1;
+
+		foreach (ListViewItem lvi in m_lvMeals.Items)
+			{
+			if (nGroup != -1 && nGroup != Int16.Parse(lvi.SubItems[0].Text))
+				{
+				// starting a new MP;
+				mp.NormalizeMeals();
+				plmp.Add(mp);
+				mp = new MP();
+				}
+			nGroup = Int16.Parse(lvi.SubItems[0].Text);
+			// build a subset of sorted entries for this meal, starting with
+			// the first reading entry before (or at) the meal, and ending
+			// with the entry immediately previous to the next meal.
+
+			BGE bge = (BGE)lvi.Tag;
+			SortedList slbge = SlbgeGetMealSubset(bge);
+
+			mp.AddMeal(slbge, m_slbge, bge);
+			}
+
+		if (mp.NGetSampleSize() > 0)
+			{
+			mp.NormalizeMeals();
+			plmp.Add(mp);
+			}
+
+		// at this point, plmp is our collection of meals...chart'em
+
+		BgGraph bgg = new BgGraph();
+
+		bgg.SetGraphicViews(BgGraph.BoxView.Meal, BgGraph.BoxView.None);
+		bool fLandscape = true;
+
+		if (m_cbxOrient.Text == "Portrait")
+			fLandscape = false;
+
+		bgg.SetBounds(60, 220, 1, 8, false, fLandscape);
+		bgg.SetDataPoints(plmp);
+		bgg.CalcGraph();
+		bgg.ShowDialog();
+
+	}
+
+	private void ClearSearch(object sender, System.EventArgs e)
+	{
+		m_lvMeals.Items.Clear();
+	}
+
+	private void FindSuspectReadings(object sender, System.EventArgs e) 
+	{
+		BGE bgeLast = null;
+
+		foreach(BGE bge in m_slbge.Values)
+			{
+			if (bgeLast != null)
+				{
+				if (bge.Date.Subtract(bgeLast.Date).TotalMinutes < 2)
+					{
+					ListViewItem lvi = LviFindBge(bge);
+
+					lvi.BackColor = Color.HotPink;
+					}
+				}
+			bgeLast = bge;
+			}
 	}
 
 

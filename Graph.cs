@@ -48,7 +48,7 @@ namespace bg
 		/// </summary>
 		private System.ComponentModel.Container components = null;
 		private System.Windows.Forms.HScrollBar m_sbhUpper;
-		private SortedList m_slbge;
+		private object m_oData;
 		private System.Windows.Forms.Button m_pbPrint;
 		private Hover m_ch = null;
 		private GrapherParams m_gp;
@@ -77,7 +77,7 @@ namespace bg
 
 			m_gp.dBgLow = 30.0;
 			m_gp.dBgHigh = 220.0;
-			m_gp.nDays = 7;
+			m_gp.nHalfDays = 14;
 			m_gp.nIntervals = 19;
 			m_gp.fShowMeals = false;
 			m_bvUpper = BoxView.Graph;
@@ -284,7 +284,7 @@ namespace bg
 		void SetPbDataPoints(PictureBox pb, VScrollBar sbv, HScrollBar sbh)
 		{
 			if (pb.Tag != null)
-				((GraphicBox)pb.Tag).SetDataPoints(m_slbge, sbv, sbh);
+				((GraphicBox)pb.Tag).SetDataPoints(m_oData, sbv, sbh);
 		}
 
 
@@ -295,9 +295,9 @@ namespace bg
 			%%Contact: rlittle
 
 		----------------------------------------------------------------------------*/
-		public void SetDataPoints(SortedList slbge)
+		public void SetDataPoints(object oData)
 		{
-			m_slbge = slbge;
+			m_oData = oData;
 			SetPbDataPoints(m_picbUpper, m_sbvUpper, m_sbhUpper);
 			SetPbDataPoints(m_picbLower, m_sbvLower, m_sbhLower);
 		}
@@ -311,10 +311,8 @@ namespace bg
 		----------------------------------------------------------------------------*/
 		void SetPbBounds(PictureBox pb)
 		{
-			if (BvFromPb(pb) == BoxView.Log)
-				((Reporter)pb.Tag).SetProps(m_gp);
-			else if (BvFromPb(pb) == BoxView.Graph)
-				((Grapher)pb.Tag).SetProps(m_gp);
+			if (BvFromPb(pb) != BoxView.None)
+				((GraphicBox)pb.Tag).SetProps(m_gp);
 		}
 
 		/* S E T  B O U N D S */
@@ -328,7 +326,7 @@ namespace bg
 		{
 			m_gp.dBgLow = dLow;
 			m_gp.dBgHigh = dHigh;
-			m_gp.nDays = nDays;
+			m_gp.nHalfDays = nDays * 2;
 			m_gp.nIntervals = nBgIntervals;
 			m_gp.fShowMeals = fShowMeals;
 			m_gp.fLandscape = fLandscape;
@@ -342,7 +340,8 @@ namespace bg
 		{
 			None,
 			Graph,
-			Log
+			Log,
+			Meal
 		};
 
 		public void AutosizeGraph(BoxView bvUpper, BoxView bvLower, GraphicBox gbUpper, GraphicBox gbLower, ref GrapherParams gp)
@@ -356,7 +355,7 @@ namespace bg
 				if (bvLower == BoxView.Graph)
 					{
 					gbLower.SetDaysPerPage(nDays);
-					gp.nDays = nDays;
+					gp.nHalfDays = nDays * 2;
 					}
 				}
 			else if (bvLower == BoxView.Log)
@@ -366,7 +365,7 @@ namespace bg
 				if (bvUpper == BoxView.Graph)
 					{
 					gbUpper.SetDaysPerPage(nDays);
-					gp.nDays = nDays;
+					gp.nHalfDays = nDays * 2;
 					}
 				}
 		}
@@ -399,16 +398,31 @@ namespace bg
 												   m_picbLower.Width - Reporter.DxpFromDxa(gr, 200), 
 												   m_picbLower.Height - Reporter.DypFromDya(gr, 200));
 
-			if (bvUpper == BoxView.Log)
-				m_picbUpper.Tag = new Reporter(rectfUpper, gr);
-			else if (bvUpper == BoxView.Graph)
-				m_picbUpper.Tag = new Grapher(rectfUpper, gr);
+			switch (bvUpper)
+				{
+				case BoxView.Log:
+					m_picbUpper.Tag = new Reporter(rectfUpper, gr);
+					break;
+				case BoxView.Graph:
+					m_picbUpper.Tag = new Grapher(rectfUpper, gr);
+					break;
+				case BoxView.Meal:
+					m_picbUpper.Tag = new MealCharter(rectfUpper, gr);
+					break;
+				}
 
-			if (bvLower == BoxView.Log)
-				m_picbLower.Tag = new Reporter(rectfLower, gr);
-			else if (bvLower == BoxView.Graph)
-				m_picbLower.Tag = new Grapher(rectfLower, gr);
-
+			switch (bvLower)
+				{
+				case BoxView.Log:
+					m_picbLower.Tag = new Reporter(rectfLower, gr);
+					break;
+				case BoxView.Graph:
+					m_picbLower.Tag = new Grapher(rectfLower, gr);
+					break;
+				case BoxView.Meal:
+					m_picbLower.Tag = new MealCharter(rectfLower, gr);
+					break;
+				}
 		}
 
 		BoxView m_bvUpper;
@@ -429,6 +443,8 @@ namespace bg
 				return BoxView.Graph;
 			else if (String.Compare(s, "Log", true) == 0)
 				return BoxView.Log;
+			else if (String.Compare(s, "Meal", true) == 0)
+				return BoxView.Meal;
 
 			return BoxView.None;
 		}
@@ -516,7 +532,7 @@ namespace bg
 				if (gb != null)
 					{
 					gb.SetProps(m_gp);
-					gb.SetDataPoints(m_slbge, sbv, sbh);
+					gb.SetDataPoints(m_oData, sbv, sbh);
 					gb.Calc();
 					gb.SetFirstFromScroll(iFirst);
 					}
@@ -650,7 +666,7 @@ namespace bg
 			grph.SetProps(gpPrint);
 			grph.DrawBanner(ev.Graphics, rcfBanner);
 //			grph.SetFirstQuarter(grphRef.GetFirstQuarter());
-			grph.SetDataPoints(m_slbge, null, null);
+			grph.SetDataPoints(m_oData, null, null);
 			grph.SetColor(fColor);
 			return (GraphicBox)grph;
 		}
@@ -667,7 +683,7 @@ namespace bg
 			Reporter rpt = new Reporter(rcf, ev.Graphics);
 
 			rpt.SetProps(gpPrint);
-			rpt.SetDataPoints(m_slbge, null, null);
+			rpt.SetDataPoints(m_oData, null, null);
 //			rpt.SetFirstLine(rptRef.GetFirstLine());
 			rpt.SetColor(fColor);
 			return (GraphicBox)rpt;
@@ -877,6 +893,8 @@ namespace bg
 				return BoxView.Graph;
 			else if (String.Compare(pb.Tag.GetType().ToString(), "bg.Reporter", true) == 0)
 				return BoxView.Log;
+			else if (String.Compare(pb.Tag.GetType().ToString(), "bg.MealCharter", true) == 0)
+				return BoxView.Meal;
 			else
 				return BoxView.None;
 		}

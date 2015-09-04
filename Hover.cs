@@ -45,7 +45,7 @@ namespace bg
 				s += "\nCarbs: " + bge.Carbs.ToString();
 
 			if (bge.InterpReading)
-				s += "\n**** INTERPOLATED ****";
+				s += "\n**** INTERPOLATED ****\n" + bge.Comment;
 			else if (bge.Comment.Length > 0)
 				s += "\nComment: " + bge.Comment;
 

@@ -3,7 +3,6 @@
 
 # ignore secret configs (passwords and such)
 *secret*.config
-*secret*.resx
 
 # User-specific files
 *.suo

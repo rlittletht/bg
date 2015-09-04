@@ -1,2 +1,2 @@
 # bg
-blood glucose reading and graphing
+Blood Glucose download and charting

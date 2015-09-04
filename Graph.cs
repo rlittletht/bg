@@ -57,6 +57,13 @@ namespace bg
 		private System.Windows.Forms.HScrollBar m_sbhLower;
 		private System.Windows.Forms.VScrollBar m_sbvLower;
 
+		/* B G  G R A P H */
+		/*----------------------------------------------------------------------------
+			%%Function: BgGraph
+			%%Qualified: bg.BgGraph.BgGraph
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		public BgGraph()
 		{
 			//
@@ -267,6 +274,13 @@ namespace bg
 		}
 		#endregion
 
+		/* S E T  P B  D A T A  P O I N T S */
+		/*----------------------------------------------------------------------------
+			%%Function: SetPbDataPoints
+			%%Qualified: bg.BgGraph.SetPbDataPoints
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		void SetPbDataPoints(PictureBox pb, VScrollBar sbv, HScrollBar sbh)
 		{
 			if (pb.Tag != null)
@@ -274,6 +288,13 @@ namespace bg
 		}
 
 
+		/* S E T  P B  D A T A  P O I N T S */
+		/*----------------------------------------------------------------------------
+			%%Function: SetPbDataPoints
+			%%Qualified: bg.BgGraph.SetPbDataPoints
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		public void SetDataPoints(SortedList slbge)
 		{
 			m_slbge = slbge;
@@ -281,6 +302,13 @@ namespace bg
 			SetPbDataPoints(m_picbLower, m_sbvLower, m_sbhLower);
 		}
 
+		/* S E T  P B  B O U N D S */
+		/*----------------------------------------------------------------------------
+			%%Function: SetPbBounds
+			%%Qualified: bg.BgGraph.SetPbBounds
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		void SetPbBounds(PictureBox pb)
 		{
 			if (BvFromPb(pb) == BoxView.Log)
@@ -296,15 +324,17 @@ namespace bg
 			%%Contact: rlittle
 
 		----------------------------------------------------------------------------*/
-		public void SetBounds(double dLow, double dHigh, int nDays, int nBgIntervals, bool fShowMeals)
+		public void SetBounds(double dLow, double dHigh, int nDays, int nBgIntervals, bool fShowMeals, bool fLandscape)
 		{
 			m_gp.dBgLow = dLow;
 			m_gp.dBgHigh = dHigh;
 			m_gp.nDays = nDays;
 			m_gp.nIntervals = nBgIntervals;
 			m_gp.fShowMeals = fShowMeals;
+			m_gp.fLandscape = fLandscape;
 			SetPbBounds(m_picbUpper);
 			SetPbBounds(m_picbLower);
+			AutosizeGraph(m_bvUpper, m_bvLower, (GraphicBox)m_picbUpper.Tag, (GraphicBox)m_picbLower.Tag, ref m_gp);
 		}
 
 		public enum BoxView
@@ -313,6 +343,32 @@ namespace bg
 			Graph,
 			Log
 		};
+
+		public void AutosizeGraph(BoxView bvUpper, BoxView bvLower, GraphicBox gbUpper, GraphicBox gbLower, ref GrapherParams gp)
+		{
+			int nDays;
+
+			if (bvUpper == BoxView.Log)
+				{
+				// get the number of lines expected in this item
+				nDays = gbUpper.GetDaysPerPage();
+				if (bvLower == BoxView.Graph)
+					{
+					gbLower.SetDaysPerPage(nDays);
+					gp.nDays = nDays;
+					}
+				}
+			else if (bvLower == BoxView.Log)
+				{
+				// get the number of lines expected in this item
+				nDays = gbLower.GetDaysPerPage();
+				if (bvUpper == BoxView.Graph)
+					{
+					gbUpper.SetDaysPerPage(nDays);
+					gp.nDays = nDays;
+					}
+				}
+		}
 
 
 		/* S E T  G R A P H I C  V I E W S */
@@ -357,6 +413,13 @@ namespace bg
 		BoxView m_bvUpper;
 		BoxView m_bvLower;
 
+		/* B V  F R O M  S T R I N G */
+		/*----------------------------------------------------------------------------
+			%%Function: BvFromString
+			%%Qualified: bg.BgGraph.BvFromString
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		static public BoxView BvFromString(string s)
 		{
 			if (String.Compare(s, "None", true) == 0)
@@ -370,23 +433,32 @@ namespace bg
 		}
 
 
+		/* P A I N T  G R A P H */
+		/*----------------------------------------------------------------------------
+			%%Function: PaintGraph
+			%%Qualified: bg.BgGraph.PaintGraph
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void PaintGraph(object sender, System.Windows.Forms.PaintEventArgs e) 
 		{
 			PictureBox pb = (PictureBox)sender;
 
 			e.Graphics.Clear(pb.BackColor);
-			if (BvFromPb(pb) == BoxView.Log)
-				{
-				((Reporter)pb.Tag).Paint(e.Graphics);
-				}
-			else if (BvFromPb(pb) == BoxView.Graph)
-				{
-				((Grapher)pb.Tag).Paint(e.Graphics);
-				}
+
+			if (pb.Tag != null)
+				((GraphicBox)pb.Tag).Paint(e.Graphics);
 		}
 
 
 		bool m_fInPaint = false;
+		/* S C R O L L  P A I N T */
+		/*----------------------------------------------------------------------------
+			%%Function: ScrollPaint
+			%%Qualified: bg.BgGraph.ScrollPaint
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void ScrollPaint(object sender, System.EventArgs e) 
 		{
 			if (m_fInPaint)
@@ -415,6 +487,13 @@ namespace bg
 			m_fInPaint = false;
 		}
 
+		/* P I C T U R E  B O X  S I Z E  C H A N G E */
+		/*----------------------------------------------------------------------------
+			%%Function: PictureBoxSizeChange
+			%%Qualified: bg.BgGraph.PictureBoxSizeChange
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		void PictureBoxSizeChange(PictureBox pb, HScrollBar sbh, VScrollBar sbv)
 		{
 			Graphics gr = this.CreateGraphics();
@@ -423,57 +502,76 @@ namespace bg
 											pb.Width - Reporter.DxpFromDxa(gr, 200), 
 											pb.Height - Reporter.DypFromDya(gr, 200));
 
-			int iFirst = ((GraphicBox)pb.Tag).GetFirstForScroll();
-
-			if (BvFromPb(pb) == BoxView.Graph)
+			if (pb.Tag != null)
 				{
-				Grapher grph = new Grapher(rcf, gr);
-
-//				grph.SetProps(m_gp);
-//				grph.SetDataPoints(m_slbge);
-//				grph.SetFirstQuarter(sbh.Value);
-
-//				grph.CalcGraph(sbh);
-
-				pb.Tag = grph;
+				int iFirst = ((GraphicBox)pb.Tag).GetFirstForScroll();
+				GraphicBox gb = null;
+	
+				if (BvFromPb(pb) == BoxView.Graph)
+					pb.Tag = gb = (GraphicBox) new Grapher(rcf, gr);
+				else if (BvFromPb(pb) == BoxView.Log)
+					pb.Tag = gb = (GraphicBox) new Reporter(rcf, gr);
+	
+				if (gb != null)
+					{
+					gb.SetProps(m_gp);
+					gb.SetDataPoints(m_slbge, sbv, sbh);
+					gb.Calc();
+					gb.SetFirstFromScroll(iFirst);
+					}
+	
+				pb.Invalidate();
 				}
-			else if (BvFromPb(pb) == BoxView.Log)
-				{
-				Reporter rpt = new Reporter(rcf, gr); // pb.Width, pb.Height, 
-//				rpt.SetProps(m_gp);
-//				rpt.SetDataPoints(m_slbge, sbv);
-//				rpt.CalcReport();
-//				rpt.SetFirstLine(sbv.Value);
-
-				pb.Tag = rpt;
-				}
-			((GraphicBox)pb.Tag).SetProps(m_gp);
-			((GraphicBox)pb.Tag).SetDataPoints(m_slbge, sbv, sbh);
-			((GraphicBox)pb.Tag).Calc();
-			((GraphicBox)pb.Tag).SetFirstFromScroll(iFirst);
-
-			pb.Invalidate();
 		}
 
+		/* H A N D L E  S I Z E  C H A N G E */
+		/*----------------------------------------------------------------------------
+			%%Function: HandleSizeChange
+			%%Qualified: bg.BgGraph.HandleSizeChange
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void HandleSizeChange(object sender, System.EventArgs e) 
 		{
 			SetupViews(this.ClientSize.Height);
+			AutosizeGraph(m_bvUpper, m_bvLower, (GraphicBox)m_picbUpper.Tag, (GraphicBox)m_picbLower.Tag, ref m_gp);
 			PictureBoxSizeChange(m_picbUpper, m_sbhUpper, m_sbvUpper);
 			PictureBoxSizeChange(m_picbLower, m_sbhLower, m_sbvLower);
 		}
 
+		/* C A L C  P I C T U R E  B O X */
+		/*----------------------------------------------------------------------------
+			%%Function: CalcPictureBox
+			%%Qualified: bg.BgGraph.CalcPictureBox
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		void CalcPictureBox(PictureBox pb, HScrollBar sbh)
 		{
 			if (pb.Tag != null)
 				((GraphicBox)pb.Tag).Calc();
 		}
 
+		/* C A L C  G R A P H */
+		/*----------------------------------------------------------------------------
+			%%Function: CalcGraph
+			%%Qualified: bg.BgGraph.CalcGraph
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		public void CalcGraph()
 		{
 			CalcPictureBox(m_picbUpper, m_sbhUpper);
 			CalcPictureBox(m_picbLower, m_sbhLower);
 		}
 
+		/* H O V E R  G R A P H */
+		/*----------------------------------------------------------------------------
+			%%Function: HoverGraph
+			%%Qualified: bg.BgGraph.HoverGraph
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void HoverGraph(object sender, System.EventArgs e)
 		{
 			PictureBox pb = (PictureBox)sender;
@@ -515,6 +613,13 @@ namespace bg
 			user32.TrackMouseEvent(ref tme);
 		}
 
+		/* H A N D L E  M O U S E */
+		/*----------------------------------------------------------------------------
+			%%Function: HandleMouse
+			%%Qualified: bg.BgGraph.HandleMouse
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void HandleMouse(object sender, System.Windows.Forms.MouseEventArgs e)
 		{
 			if (m_fTipShowing == false)
@@ -530,43 +635,98 @@ namespace bg
 		private bool m_fTipShowing;
 		private RectangleF m_rectfTipHitRegion;
 
-		void GraphPrintRegion(Grapher grphRef, RectangleF rcf, RectangleF rcfBanner, PrintPageEventArgs ev)
+		/* G R A P H  P R I N T  R E G I O N */
+		/*----------------------------------------------------------------------------
+			%%Function: GraphPrintRegion
+			%%Qualified: bg.BgGraph.GraphPrintRegion
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
+		GraphicBox GraphPrintRegion(RectangleF rcf, RectangleF rcfBanner, PrintPageEventArgs ev, bool fColor)
 		{
 			Grapher grph = new Grapher(rcf, ev.Graphics);
 
-			grph.SetProps(m_gp);
+			grph.SetProps(gpPrint);
 			grph.DrawBanner(ev.Graphics, rcfBanner);
-			grph.SetFirstQuarter(grphRef.GetFirstQuarter());
+//			grph.SetFirstQuarter(grphRef.GetFirstQuarter());
 			grph.SetDataPoints(m_slbge, null, null);
-			grph.Paint(ev.Graphics);
+			grph.SetColor(fColor);
+			return (GraphicBox)grph;
 		}
 
-		void LogPrintRegion(Reporter rptRef, RectangleF rcf, PrintPageEventArgs ev)
+		/* L O G  P R I N T  R E G I O N */
+		/*----------------------------------------------------------------------------
+			%%Function: LogPrintRegion
+			%%Qualified: bg.BgGraph.LogPrintRegion
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
+		GraphicBox LogPrintRegion(RectangleF rcf, PrintPageEventArgs ev, bool fColor)
 		{
 			Reporter rpt = new Reporter(rcf, ev.Graphics);
 
-			rpt.SetProps(m_gp);
+			rpt.SetProps(gpPrint);
 			rpt.SetDataPoints(m_slbge, null, null);
-			rpt.SetFirstLine(rptRef.GetFirstLine());
-			rpt.Calc();
-			rpt.Paint(ev.Graphics);
+//			rpt.SetFirstLine(rptRef.GetFirstLine());
+			rpt.SetColor(fColor);
+			return (GraphicBox)rpt;
 		}
 
+		void PaintPrintRegion(GraphicBox gb, BoxView bv, Graphics gr, DateTime dttmFirst)
+		{
+			if (gb == null)
+				return;
+
+			gb.Calc();
+
+			if (bv == BoxView.Log)
+				gb.SetFirstDateTime(dttmFirst);
+			else if (bv == BoxView.Graph)
+				gb.SetFirstDateTime(dttmFirst.AddDays(-1.0));
+
+			gb.Paint(gr);
+		}
+
+		/* P R I N T  P A G E  H A N D L E R */
+		/*----------------------------------------------------------------------------
+			%%Function: PrintPageHandler
+			%%Qualified: bg.BgGraph.PrintPageHandler
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void PrintPageHandler(object sender, PrintPageEventArgs ev)
 		{
 			Rectangle rectMargins = ev.MarginBounds;
 			Rectangle rectPage = ev.PageBounds;
+			PrintDocument ppd = (PrintDocument)sender;
+
+			rectMargins = new Rectangle((int)Reporter.DxpFromDxaPrint(ev.Graphics, (float)(ev.MarginBounds.X * 14.40)),
+										(int)Reporter.DypFromDyaPrint(ev.Graphics, (float)(ev.MarginBounds.Y * 14.40)),
+										(int)Reporter.DxpFromDxaPrint(ev.Graphics, (float)(ev.MarginBounds.Width * 14.40)),
+										(int)Reporter.DypFromDyaPrint(ev.Graphics, (float)(ev.MarginBounds.Height * 14.40)));
+
 
 			// adjust the bottom margin...
-			rectMargins.Height -= (int)Reporter.DypFromDya(ev.Graphics, 70);
+			rectMargins.Height -= (int)Reporter.DypFromDyaPrint(ev.Graphics, 70);
+
+			// page size is 8.5 x 11.  we are shooting for 8" x 10.5"
 
 //			ev.Graphics.DrawRectangle(new Pen(new SolidBrush(Color.Blue), 1.0F), rectMargins);
 			int nPctUpper = 70;
-			int nMarginTop = (int)Reporter.DypFromDya(ev.Graphics, 25);
+			int nMarginTop = (int)Reporter.DypFromDyaPrint(ev.Graphics, 25);
 			int nMarginBetween = nMarginTop;
-			int nHeightTotal = rectMargins.Bottom - rectMargins.Top;
+			bool fColor = ppd.PrinterSettings.SupportsColor;
+
+			int nHeightTotal = (int)Reporter.DypFromDyaPrint(ev.Graphics, 1440.0F * 10.5F);
+			int nWidthTotal = (int)Reporter.DxpFromDxaPrint(ev.Graphics, 1440.0F * 8.0F);
+			if (ev.PageSettings.Landscape)
+				{
+				nWidthTotal = (int)Reporter.DypFromDyaPrint(ev.Graphics, 1440.0F * 10.5F);
+				nHeightTotal= (int)Reporter.DxpFromDxaPrint(ev.Graphics, 1440.0F * 8.0F);
+				}
+
 			int nHeightAvail = nHeightTotal - nMarginBetween - nMarginTop;
-			int nWidth = rectMargins.Right - rectMargins.Left - (int)Reporter.DxpFromDxa(ev.Graphics, 10);
+			int nWidth = nWidthTotal - (int)Reporter.DxpFromDxaPrint(ev.Graphics, 10);
 
 			if (m_bvUpper == BoxView.None)
 				nPctUpper = 0;
@@ -577,45 +737,83 @@ namespace bg
 			RectangleF rcfUpperBanner = new RectangleF(0, 0, nWidth, nMarginTop);
 			RectangleF rcfUpper = new RectangleF(0, rcfUpperBanner.Bottom, nWidth, ((nHeightAvail) * nPctUpper) / 100);
 			RectangleF rcfLowerBanner = new RectangleF(0, rcfUpper.Bottom, nWidth, nMarginBetween);
-			RectangleF rcfLower = new RectangleF(0, rcfUpper.Bottom + nMarginBetween, nWidth, rectMargins.Bottom - (rcfUpper.Bottom + nMarginBetween));
+			RectangleF rcfLower = new RectangleF(0, rcfUpper.Bottom + nMarginBetween, nWidth, nHeightAvail - (rcfUpper.Bottom + nMarginBetween * 2));
+
+			// whenever we go to print, if there's a log, then the first date in the log becomes the first date for the graph too
 
 			// paint the upper region
+			GraphicBox gbUpper = null;
+			GraphicBox gbLower = null;
+
 			switch (m_bvUpper)
 				{
 				case BoxView.Graph:
 					{
 					Grapher grph = (Grapher)m_picbUpper.Tag;
-					GraphPrintRegion(grph, rcfUpper, rcfUpperBanner, ev);
+					gbUpper = GraphPrintRegion(rcfUpper, rcfUpperBanner, ev, fColor);
 					break;
 					}
 				case BoxView.Log:
 					{
 					Reporter rpt = (Reporter)m_picbUpper.Tag;
-					LogPrintRegion(rpt, rcfUpper, ev);
+					gbUpper = LogPrintRegion(rcfUpper, ev, fColor);
 					break;
 					}
 				}
-
+			
 			switch (m_bvLower)
 				{
 				case BoxView.Graph:
 					{
 					Grapher grph = (Grapher)m_picbLower.Tag;
-					GraphPrintRegion(grph, rcfLower, rcfLowerBanner, ev);
+					gbLower = GraphPrintRegion(rcfLower, rcfLowerBanner, ev, fColor);
 					break;
 					}
 				case BoxView.Log:
 					{
 					Reporter rpt = (Reporter)m_picbLower.Tag;
-					LogPrintRegion(rpt, rcfLower, ev);
+					gbLower = LogPrintRegion(rcfLower, ev, fColor);
 					break;
 					}
 				}
+
+			AutosizeGraph(m_bvUpper, m_bvLower, gbUpper, gbLower, ref gpPrint);
+			PaintPrintRegion(gbUpper, m_bvUpper, ev.Graphics, dttmCurPage);
+			PaintPrintRegion(gbLower, m_bvLower, ev.Graphics, dttmCurPage);
+
+			// setup dttmCurPage for the next page
+			// again, the log wins
+			bool fMore = false;
+
+			if (gbUpper != null)
+				{
+				fMore = gbUpper.FGetLastDateTimeOnPage(out dttmCurPage);
+
+				// if we are getting the "last date" from a graph region, then
+				// don't overlap the last day of page N with the page N+1.
+				if (fMore && m_bvUpper == BoxView.Graph)
+					dttmCurPage = dttmCurPage.AddDays(1.0f);
+				}
+
+			if (m_bvLower == BoxView.Log)
+				fMore = gbLower.FGetLastDateTimeOnPage(out dttmCurPage);
+
+			ev.HasMorePages = fMore;
 		}
 
 		PrinterSettings m_prtSettings = null;
 		PageSettings m_pgSettings = null;
 
+		DateTime dttmCurPage;
+		GrapherParams gpPrint;
+
+		/* P R I N T  G R A P H */
+		/*----------------------------------------------------------------------------
+			%%Function: PrintGraph
+			%%Qualified: bg.BgGraph.PrintGraph
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void PrintGraph(object sender, System.EventArgs e) 
 		{
 			PrintDocument ppd = new PrintDocument();
@@ -626,7 +824,7 @@ namespace bg
 				}
 			else
 				{
-				ppd.DefaultPageSettings.Landscape = true;
+				ppd.DefaultPageSettings.Landscape = m_gp.fLandscape;
 				ppd.DefaultPageSettings.Margins = new Margins(25, 25, 25, 25);
 				}
 
@@ -643,12 +841,32 @@ namespace bg
 			dlgPrint.ShowDialog();
 			m_prtSettings = ppd.PrinterSettings;
 			m_pgSettings = ppd.DefaultPageSettings;
+
+			dttmCurPage = ((GraphicBox)m_picbUpper.Tag).GetFirstDateTime();
+			gpPrint = m_gp;
+#if DEBUG
+			DateTime dttmOld = dttmCurPage;
+			((GraphicBox)m_picbUpper.Tag).SetFirstDateTime(dttmCurPage);
+			dttmCurPage = ((GraphicBox)m_picbUpper.Tag).GetFirstDateTime();
+			if (DateTime.Compare(dttmOld, dttmCurPage) != 0)
+				throw new Exception("SetFirstDateTime identity failed!");
+#endif
+			if (m_bvLower == BoxView.Log)
+				dttmCurPage = ((GraphicBox)m_picbLower.Tag).GetFirstDateTime();
+
 			ppd.Print();
 
 		}
 
 //		int m_iFirstLine;
 
+		/* B V  F R O M  P B */
+		/*----------------------------------------------------------------------------
+			%%Function: BvFromPb
+			%%Qualified: bg.BgGraph.BvFromPb
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		BoxView BvFromPb(PictureBox pb)
 		{
 			if (pb.Tag == null)
@@ -662,6 +880,13 @@ namespace bg
 				return BoxView.None;
 		}
 
+		/* S E T  V I E W  D A T E  T I M E  S C R O L L */
+		/*----------------------------------------------------------------------------
+			%%Function: SetViewDateTimeScroll
+			%%Qualified: bg.BgGraph.SetViewDateTimeScroll
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		void SetViewDateTimeScroll(PictureBox pb, HScrollBar sbh, VScrollBar sbv, DateTime dttm, int iFirstQuarter)
 		{
 			if (BvFromPb(pb) == BoxView.Log)
@@ -693,6 +918,13 @@ namespace bg
 			pb.Invalidate();
 		}
 
+		/* S C R O L L  V E R T  P A I N T */
+		/*----------------------------------------------------------------------------
+			%%Function: ScrollVertPaint
+			%%Qualified: bg.BgGraph.ScrollVertPaint
+			%%Contact: rlittle
+
+		----------------------------------------------------------------------------*/
 		private void ScrollVertPaint(object sender, System.EventArgs e)
 		{
 			if (m_fInPaint)

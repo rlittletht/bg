@@ -41,8 +41,8 @@ Interop.AxSHDocVw.dll: $(SRCDIR)\AxInterop.SHDocVw.dll
 	
 #  bg.m_frm.resources	
 #/res:bg.m_frm.resources  
-bg.exe: AssemblyInfo.netmodule $(SRCDIR)\bg.cs $(SRCDIR)\App.ico $(SHARED)\ole32.cs $(SHARED)\ui.cs $(SRCDIR)\graph.cs $(SRCDIR)\hover.cs AxInterop.SHDocVw.dll Interop.SHDocVw.dll mshtml.dll bg._bg.resources
-	csc $(CS_FLAGS) /target:winexe /out:bg.exe /addmodule:AssemblyInfo.netmodule $(SRCDIR)\bg.cs $(SHARED)\ole32.cs $(SHARED)\ui.cs $(SRCDIR)\graph.cs $(SRCDIR)\hover.cs /r:AxInterop.SHDocVw.dll /r:Interop.SHDocVw.dll /r:mshtml.dll /res:bg._bg.resources
+bg.exe: AssemblyInfo.netmodule $(SRCDIR)\bg.cs $(SRCDIR)\App.ico $(SHARED)\ole32.cs $(SHARED)\comport.cs $(SHARED)\ui.cs $(SRCDIR)\graph.cs $(SRCDIR)\hover.cs AxInterop.SHDocVw.dll Interop.SHDocVw.dll mshtml.dll bg._bg.resources
+	csc $(CS_FLAGS) /target:winexe /out:bg.exe /addmodule:AssemblyInfo.netmodule $(SRCDIR)\bg.cs $(SHARED)\comport.cs $(SHARED)\ole32.cs $(SHARED)\ui.cs $(SRCDIR)\graph.cs $(SRCDIR)\hover.cs /r:AxInterop.SHDocVw.dll /r:Interop.SHDocVw.dll /r:mshtml.dll /res:bg._bg.resources
 	
 	
 

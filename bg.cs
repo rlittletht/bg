@@ -9,9 +9,16 @@ using System.Globalization;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
 using System.IO;
+using UWin32;
+using System.Threading;
+using System.Text;
 
 namespace bg
 {
+
+//	___  ____ ____
+//	|__] | __ |___
+//	|__] |__] |___
 
 public class BGE // BG Entry
 {
@@ -21,7 +28,9 @@ public class BGE // BG Entry
 		Lunch,
 		Dinner,
 		Snack,
-		SpotTest
+		SpotTest,
+		Control,
+		New
 	};
 
 	public enum CompareType
@@ -59,6 +68,10 @@ public class BGE // BG Entry
 			return ReadingType.Dinner;
 		else if (String.Compare(s, "snack", true) == 0)
 			return ReadingType.Snack;
+		else if (String.Compare(s, "new", true) == 0)
+			return ReadingType.New;
+		else if (String.Compare(s, "control", true) == 0)
+			return ReadingType.Control;
 		else
 			return ReadingType.SpotTest;
 	}
@@ -83,6 +96,10 @@ public class BGE // BG Entry
 				return "Snack";
 			case ReadingType.Dinner:
 				return "Dinner";
+			case ReadingType.New:
+				return "*NEW*";
+			case ReadingType.Control:
+				return "Control";
 			default:
 				return "SpotTest";
 			}
@@ -248,8 +265,12 @@ public struct GrapherParams
 	public bool fShowMeals;
 	public double dBgLow;
 	public double dBgHigh;
+	public bool fLandscape;
 }
 
+//  ______  ______ _______  _____  _     _ _____ _______   ______   _____  _     _
+// |  ____ |_____/ |_____| |_____] |_____|   |   |         |_____] |     |  \___/
+// |_____| |    \_ |     | |       |     | __|__ |_____    |_____] |_____| _/   \_
 
 public interface GraphicBox
 {
@@ -260,6 +281,13 @@ public interface GraphicBox
 	void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh);
 	void SetProps(GrapherParams gp);
 	int GetFirstForScroll();
+	void SetColor(bool fColor);
+	int GetDaysPerPage();
+	void SetDaysPerPage(int nDaysPerPage);
+	DateTime GetFirstDateTime();
+	void SetFirstDateTime(DateTime dttm);
+	bool FGetLastDateTimeOnPage(out DateTime dttm);
+
 }
 
 //	 ______ _______  _____   _____   ______ _______ _______  ______
@@ -279,6 +307,7 @@ public class Reporter : GraphicBox
 	double m_dHoursBefore = 2.0;
 	double m_dHoursAfter = 1.5;
 	RectangleF m_rcfDrawing;
+	bool m_fColor = true;
 
 	COLD []m_mpicold;
 	float []m_mpicolDxp;
@@ -466,6 +495,18 @@ public class Reporter : GraphicBox
 	}
 
 
+	/* S E T  C O L O R */
+	/*----------------------------------------------------------------------------
+		%%Function: SetColor
+		%%Qualified: bg.Reporter.SetColor
+		%%Contact: rlittle
+		
+	----------------------------------------------------------------------------*/
+	public void SetColor(bool fColor)
+	{
+		m_fColor = fColor;
+	}
+
 	/* S E T  F I R S T  F R O M  S C R O L L */
 	/*----------------------------------------------------------------------------
 		%%Function: SetFirstFromScroll
@@ -487,7 +528,12 @@ public class Reporter : GraphicBox
 	----------------------------------------------------------------------------*/
 	static public float DxpFromDxa(Graphics gr, float dxa)
 	{
-		return (dxa * (float)gr.DpiX) / 1440.0F;
+		return (float)(((double)dxa * gr.DpiX) / 1440.0);
+	}
+
+	static public float DxpFromDxaPrint(Graphics gr, float dxa)
+	{
+		return (float)(((double)dxa * 100.0) / 1440.0);
 	}
 
 	/* D Y P  F R O M  D Y A */
@@ -499,7 +545,12 @@ public class Reporter : GraphicBox
 	----------------------------------------------------------------------------*/
 	static public float DypFromDya(Graphics gr, float dya)
 	{
-		return (dya * (float)gr.DpiY) / 1440.0F;
+		return (float)(((double)dya * gr.DpiY) / 1440.0);
+	}
+
+	static public float DypFromDyaPrint(Graphics gr, float dya)
+	{
+		return (float)(((double)dya * 100.0) / 1440.0);
 	}
 
 	/* S E T  F I R S T  L I N E */
@@ -637,23 +688,29 @@ public class Reporter : GraphicBox
 		m_cgp.nDays = 7;
 		m_cgp.nIntervals = 19;
 		m_cgp.fShowMeals = false;
+
+		float dy = YFromLine(2) - YFromLine(1);
+
+
+		m_nLinesPerPage = (int)(m_nHeight / dy) - 1 ;
+
 		Font font = new Font("Tahoma", 8);
 
 		SetColWidth(icolDay, 5, BorderType.Solid, BorderType.None);
 
-		SetColWidth(icolMealBreakfast, 5, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealBreakfast + 1, 5, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealBreakfast + 2, 5, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealBreakfast, 4, BorderType.Double, BorderType.None);
+		SetColWidth(icolMealBreakfast + 1, 3, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealBreakfast + 2, 4, BorderType.Solid, BorderType.None);
 
-		SetColWidth(icolMealLunch, 5, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealLunch + 1, 5, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealLunch + 2, 5, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealLunch, 4, BorderType.Double, BorderType.None);
+		SetColWidth(icolMealLunch + 1, 3, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealLunch + 2, 4, BorderType.Solid, BorderType.None);
 
-		SetColWidth(icolMealDinner, 5, BorderType.Double, BorderType.None);
-		SetColWidth(icolMealDinner + 1, 5, BorderType.Solid, BorderType.None);
-		SetColWidth(icolMealDinner + 2, 5, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealDinner, 4, BorderType.Double, BorderType.None);
+		SetColWidth(icolMealDinner + 1, 3, BorderType.Solid, BorderType.None);
+		SetColWidth(icolMealDinner + 2, 4, BorderType.Solid, BorderType.None);
 
-		SetColWidth(icolBed, 5, BorderType.Double, BorderType.None);
+		SetColWidth(icolBed, 4, BorderType.Double, BorderType.None);
 
 		SetColWidth(icolComments, 0, BorderType.Double, BorderType.None);
 	}
@@ -775,10 +832,6 @@ public class Reporter : GraphicBox
 		// the number of days is the number of lines.
 		m_nLines = ts.Days + 1;
 		m_iLineFirst = 0;
-		float dy = YFromLine(2) - YFromLine(1);
-
-
-		m_nLinesPerPage = (int)(m_nHeight / dy) - 1 ;
 		if (sbv != null)
 			{
 			if (m_nLines <= m_nLinesPerPage)
@@ -957,7 +1010,7 @@ public class Reporter : GraphicBox
 				if (bge.Date.Day == dttmNextDay.Day)
 					dHours += 24.0F;
 
-				if (readingFirst == 0)
+				if (readingFirst == 0 && dHours <= dMeals[iMealBreakfast])
 					readingFirst = bge.Reading;
 
 				if (iMealNext <= iMealDinner)
@@ -1077,6 +1130,16 @@ public class Reporter : GraphicBox
 	}
 
 
+	public int GetDaysPerPage()
+	{
+		return m_nLinesPerPage;
+	}
+
+	public void SetDaysPerPage(int nDaysPerPage)
+	{
+		throw new Exception("Cannot set days per page in a report!");
+	}
+
 	/* P A I N T */
 	/*----------------------------------------------------------------------------
 		%%Function: Paint
@@ -1099,6 +1162,18 @@ public class Reporter : GraphicBox
 			}
 	}
 
+	public bool FGetLastDateTimeOnPage(out DateTime dttm)
+	{
+		dttm = GetFirstDateTime();
+		if (m_iLineFirst + m_nLinesPerPage > m_nLines)
+			{
+			return false;
+			}
+
+		dttm = dttm.AddDays(m_nLinesPerPage);
+		return true;
+	}
+
 	/* F  H I T  T E S T */
 	/*----------------------------------------------------------------------------
 		%%Function: FHitTest
@@ -1115,8 +1190,16 @@ public class Reporter : GraphicBox
 
 }
 
+//  ______  ______ _______  _____  _     _ _______  ______
+// |  ____ |_____/ |_____| |_____] |_____| |______ |_____/
+// |_____| |    \_ |     | |       |     | |______ |    \_
+
 public class Grapher : GraphicBox
 {
+//  _  _ ____ _  _ ___  ____ ____     _  _ ____ ____ _ ____ ___  _    ____ ____
+//	|\/| |___ |\/| |__] |___ |__/     |  | |__| |__/ | |__| |__] |    |___ [__
+//	|  | |___ |  | |__] |___ |  \      \/  |  | |  \ | |  | |__] |___ |___ ___]
+
 	float m_nHeight;
 	float m_nWidth;
 	RectangleF m_rcfDrawing;
@@ -1126,17 +1209,22 @@ public class Grapher : GraphicBox
 	double m_dxQuarter;
 	int m_iFirstQuarter;
 	float m_dxAdjust = 0;
-	
+	bool m_fColor = true;
+
 	ArrayList m_plptfi;
 
 	float m_dxOffset = 30.0F;
 	float m_dyOffset = 45.0F;
 
-//	float m_dxLeftMargin = 15.0F;
-//	float m_dxRightMargin = 0;
-//	float m_dyTopMargin = 0;
-//	float m_dyBottomMargin = 0;
+	HScrollBar m_sbh;
 
+	/* G R A P H E R */
+	/*----------------------------------------------------------------------------
+		%%Function: Grapher
+		%%Qualified: bg.Grapher.Grapher
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public Grapher(RectangleF rcf, Graphics gr) // int nWidth, int nHeight
 	{
 		m_rcfDrawing = rcf;
@@ -1153,34 +1241,83 @@ public class Grapher : GraphicBox
 		m_dyOffset = gr.MeasureString("0\n0\n0\n0\n", font).Height;
 	}
 
-//	public void SetMargins(float dxMarginLeft, float dxMarginRight, float dyMarginTop, float dyMarginBottom)
-//	{
-//		m_dxLeftMargin = dxMarginLeft;
-//		m_dxRightMargin = dxMarginRight;
-//		m_dyTopMargin = dyMarginTop;
-//		m_dyBottomMargin = dyMarginBottom;
-//	}
+	public int GetDaysPerPage()
+	{
+		return m_cgp.nDays;
+	}
 
+	public void SetDaysPerPage(int nDaysPerPage)
+	{
+		m_cgp.nDays = nDaysPerPage;
+	}
+
+	/* S E T  F I R S T  F R O M  S C R O L L */
+	/*----------------------------------------------------------------------------
+		%%Function: SetFirstFromScroll
+		%%Qualified: bg.Grapher.SetFirstFromScroll
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void SetFirstFromScroll(int i)
 	{
 		SetFirstQuarter(i);
 	}
 
+	/* S E T  F I R S T  Q U A R T E R */
+	/*----------------------------------------------------------------------------
+		%%Function: SetFirstQuarter
+		%%Qualified: bg.Grapher.SetFirstQuarter
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void SetFirstQuarter(int i)
 	{
 		m_iFirstQuarter = i;
 	}
 
+	/* G E T  F I R S T  Q U A R T E R */
+	/*----------------------------------------------------------------------------
+		%%Function: GetFirstQuarter
+		%%Qualified: bg.Grapher.GetFirstQuarter
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public int GetFirstQuarter()
 	{
 		return m_iFirstQuarter;
 	}
 
+	/* S E T  C O L O R */
+	/*----------------------------------------------------------------------------
+		%%Function: SetColor
+		%%Qualified: bg.Grapher.SetColor
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	public void SetColor(bool fColor)
+	{
+		m_fColor = fColor;
+	}
+
+	/* G E T  F I R S T  F O R  S C R O L L */
+	/*----------------------------------------------------------------------------
+		%%Function: GetFirstForScroll
+		%%Qualified: bg.Grapher.GetFirstForScroll
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public int GetFirstForScroll()
 	{
 		return GetFirstQuarter();
 	}
 
+	/* G E T  F I R S T  D A T E  T I M E */
+	/*----------------------------------------------------------------------------
+		%%Function: GetFirstDateTime
+		%%Qualified: bg.Grapher.GetFirstDateTime
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public DateTime GetFirstDateTime()
 	{
 		PTFI ptfi = (PTFI)m_plptfi[0];
@@ -1192,15 +1329,29 @@ public class Grapher : GraphicBox
 		return dttm;
 	}
 
+	/* S E T  F I R S T  D A T E  T I M E */
+	/*----------------------------------------------------------------------------
+		%%Function: SetFirstDateTime
+		%%Qualified: bg.Grapher.SetFirstDateTime
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void SetFirstDateTime(DateTime dttm)
 	{
 		PTFI ptfi = (PTFI)m_plptfi[0];
 		DateTime dttmFirst = new DateTime(ptfi.bge.Date.Year, ptfi.bge.Date.Month, ptfi.bge.Date.Day);
 		TimeSpan ts = dttm.Subtract(dttmFirst);
-		m_iFirstQuarter = (int)(4.0 * ts.TotalHours);
+		m_iFirstQuarter = (int)(4.0 * ts.TotalHours) + 1;
 	}
 
 
+	/* P T F  F R O M  B G E */
+	/*----------------------------------------------------------------------------
+		%%Function: PtfFromBge
+		%%Qualified: bg.Grapher.PtfFromBge
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	PointF PtfFromBge(DateTime dayFirst, BGE bge, double dxQuarter, double dyBg)
 	{
 		float x = XFromDate(dayFirst, bge.Date, dxQuarter);
@@ -1210,40 +1361,72 @@ public class Grapher : GraphicBox
 		return new PointF(x,y);
 	}
 
+	/* S E T  D A T A  P O I N T S */
+	/*----------------------------------------------------------------------------
+		%%Function: SetDataPoints
+		%%Qualified: bg.Grapher.SetDataPoints
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
 	{
 		m_slbge = slbge;
 		m_sbh = sbh;
 	}
 
+	/* S E T  P R O P S */
+	/*----------------------------------------------------------------------------
+		%%Function: SetProps
+		%%Qualified: bg.Grapher.SetProps
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void SetProps(GrapherParams cgp)
 	{
 		m_cgp = cgp;
 	}
 
+	/* Y  F R O M  R E A D I N G */
+	/*----------------------------------------------------------------------------
+		%%Function: YFromReading
+		%%Qualified: bg.Grapher.YFromReading
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public float YFromReading(int nReading, double dyPerBgUnit)
 	{
 		if (nReading == 0)
 			return -1.0F;
 
-//		return (float)(m_nHeight - ((nReading - m_cgp.dBgLow) * dyPerBgUnit) - m_dyOffset - m_dyBottomMargin);
 		return m_rcfDrawing.Top + m_nHeight - ((((float)nReading - (float)m_cgp.dBgLow) * (float)dyPerBgUnit)) - m_dyOffset;
 	}
 
+	/* X  F R O M  D A T E */
+	/*----------------------------------------------------------------------------
+		%%Function: XFromDate
+		%%Qualified: bg.Grapher.XFromDate
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public float XFromDate(DateTime dayFirst, DateTime dttm, double dxQuarter)
 	{
 		// calculate how many quarter hours
 		long ticks = dttm.Ticks - dayFirst.Ticks;
-//			long lQuarters = (ticks / DateTime.TicksPerHour) / 4;
 		long lQuarters = ticks / (36000000000 / 4);
 
 		return (float)((lQuarters * dxQuarter) + m_rcfDrawing.Left); // (m_dxOffset + m_dxLeftMargin));
 	}
 
-	HScrollBar m_sbh;
+	/* C A L C */
+	/*----------------------------------------------------------------------------
+		%%Function: Calc
+		%%Qualified: bg.Grapher.Calc
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void Calc()
 	{
-	// graph the points in the dataset, m_cgp.nDays at a time
+		// graph the points in the dataset, m_cgp.nDays at a time
 		BGE bge = (BGE)m_slbge.GetByIndex(0);
 		DateTime dayFirst = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day);
    
@@ -1298,6 +1481,17 @@ public class Grapher : GraphicBox
 		m_dxQuarter = dxQuarter;
 	}
 
+	//	___  ____ _ _  _ ___ _ _  _ ____
+	//	|__] |__| | |\ |  |  | |\ | | __
+	//	|    |  | | | \|  |  | | \| |__]
+
+	/* D R A W  B A N N E R */
+	/*----------------------------------------------------------------------------
+		%%Function: DrawBanner
+		%%Qualified: bg.Grapher.DrawBanner
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void DrawBanner(Graphics gr, RectangleF rcf)
 	{
 		Font font = new Font("Tahoma", 12);
@@ -1305,6 +1499,13 @@ public class Grapher : GraphicBox
 //		gr.DrawString("Graph", font, new SolidBrush(Color.Black), rcf);
 	}
 
+	/* P A I N T */
+	/*----------------------------------------------------------------------------
+		%%Function: Paint
+		%%Qualified: bg.Grapher.Paint
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	public void Paint(Graphics gr)
 	{
 		// there are several things that have to happen.
@@ -1513,6 +1714,20 @@ public class Grapher : GraphicBox
 		m_dxAdjust = dxAdjust;
 	}
 
+
+	public bool FGetLastDateTimeOnPage(out DateTime dttm)
+	{
+		DateTime dttmLast = ((PTFI)m_plptfi[m_plptfi.Count - 1]).bge.Date;
+
+		dttm = GetFirstDateTime();
+
+		if (dttm.AddDays(m_cgp.nDays) > dttmLast)
+			return false;
+
+		dttm = dttm.AddDays(m_cgp.nDays);
+		return true;
+	}
+
 	void AddCurvePoint(double dNext, double dCur, ref double dCum, ref ArrayList plptf, int dxAdjust, DateTime dttmFirst, ref DateTime dttm, double dHours, int nReading, int nPctSlop, int nPctAbove)
 	{
 		if (dNext - dCur - dCum < dHours)
@@ -1646,10 +1861,17 @@ public class Grapher : GraphicBox
 	{
 		SolidBrush hBrushTrans;
 
-		hBrushTrans = new SolidBrush(Color.FromArgb(255,255, 255, 167));
+		if (m_fColor)
+			hBrushTrans = new SolidBrush(Color.FromArgb(255, 255, 255, 167));
+		else
+			hBrushTrans = new SolidBrush(Color.FromArgb(255, 215, 215, 215));
+
 		ShadeRanges2(gr, dxAdjust, dttmFirst, hBrushTrans, 10, 20);
 
-		hBrushTrans = new SolidBrush(Color.FromArgb(255, 174, 255, 174));
+		if (m_fColor)
+			hBrushTrans = new SolidBrush(Color.FromArgb(255, 174, 255, 174));
+		else
+			hBrushTrans = new SolidBrush(Color.FromArgb(255, 192, 192, 192));
 		ShadeRanges2(gr, dxAdjust, dttmFirst, hBrushTrans, 0, 0);
 
 	}
@@ -1843,8 +2065,6 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.CheckBox m_cbDinner;
 	private System.Windows.Forms.CheckBox m_cbSnack;
 	private System.Windows.Forms.Label label12;
-	private System.Windows.Forms.Label label13;
-	private System.Windows.Forms.Button m_pbGraphFast;
 	private System.Windows.Forms.Label label14;
 	private System.Windows.Forms.TextBox m_ebFastLength;
 	private System.Windows.Forms.GroupBox groupBox1;
@@ -1853,27 +2073,17 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.TextBox m_ebLifetimeAvg;
 	private System.Windows.Forms.GroupBox groupBox2;
 	private System.Windows.Forms.TextBox m_ebAvg30;
-	private System.Windows.Forms.Label label20;
-	private System.Windows.Forms.Label label23;
 	private System.Windows.Forms.TextBox m_ebFastingAvg;
 	private System.Windows.Forms.TextBox m_ebFastingAvg30;
 	private System.Windows.Forms.GroupBox groupBox3;
 	private System.Windows.Forms.TextBox m_ebFastingAvg15;
 	private System.Windows.Forms.TextBox m_ebAvg15;
-	private System.Windows.Forms.Label label24;
-	private System.Windows.Forms.Label label25;
 	private System.Windows.Forms.GroupBox groupBox4;
 	private System.Windows.Forms.TextBox m_ebFastingAvg7;
 	private System.Windows.Forms.TextBox m_ebAvg7;
-	private System.Windows.Forms.Label label26;
-	private System.Windows.Forms.Label label27;
 	private System.Windows.Forms.Label label28;
 	private System.Windows.Forms.Label label29;
 	private System.Windows.Forms.CheckBox m_cbShowMeals;
-	private System.Windows.Forms.RadioButton m_rbCustom;
-	private System.Windows.Forms.RadioButton m_rb30Days;
-	private System.Windows.Forms.RadioButton m_rb15Days;
-	private System.Windows.Forms.RadioButton m_rb7Days;
 	private System.Windows.Forms.TextBox m_ebIntervals;
 	private System.Windows.Forms.TextBox m_ebHigh;
 	private System.Windows.Forms.TextBox m_ebLow;
@@ -1890,7 +2100,43 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.Label label30;
 	private System.Windows.Forms.Label label31;
 	private System.Windows.Forms.ComboBox m_cbxUpper;
-	private System.Windows.Forms.ComboBox m_cbxLower; 
+	private System.Windows.Forms.ComboBox m_cbxLower;
+	private System.Windows.Forms.ComboBox m_cbxOrient;
+	private System.Windows.Forms.ComboBox m_cbxDateRange;
+	private System.Windows.Forms.ComboBox m_cbxFilterType;
+	private System.Windows.Forms.Label label13;
+	private System.Windows.Forms.Button button1;
+	private System.Windows.Forms.Label label34;
+	private System.Windows.Forms.Label label35;
+	private System.Windows.Forms.Label label20;
+	private System.Windows.Forms.Label label23;
+	private System.Windows.Forms.Label label36;
+	private System.Windows.Forms.Label label37;
+	private System.Windows.Forms.Label label24;
+	private System.Windows.Forms.Label label25;
+	private System.Windows.Forms.Label label32;
+	private System.Windows.Forms.Label label33;
+	private System.Windows.Forms.Label label26;
+	private System.Windows.Forms.Label label27;
+	private System.Windows.Forms.Label label38;
+	private System.Windows.Forms.Label label39;
+	private System.Windows.Forms.TextBox m_ebA1c;
+	private System.Windows.Forms.TextBox m_ebAvgWgt;
+	private System.Windows.Forms.GroupBox groupBox5;
+	private System.Windows.Forms.Label label40;
+	private System.Windows.Forms.Label label41;
+	private System.Windows.Forms.Label label42;
+	private System.Windows.Forms.Label label43;
+	private System.Windows.Forms.TextBox m_ebA1c90;
+	private System.Windows.Forms.TextBox m_ebWgtAvg90;
+	private System.Windows.Forms.TextBox m_ebA1c30;
+	private System.Windows.Forms.TextBox m_ebWgtAvg30;
+	private System.Windows.Forms.TextBox m_ebA1c15;
+	private System.Windows.Forms.TextBox m_ebWgtAvg15;
+	private System.Windows.Forms.TextBox m_ebA1c7;
+	private System.Windows.Forms.TextBox m_ebWgtAvg7;
+	private System.Windows.Forms.TextBox m_ebAvg90;
+	private System.Windows.Forms.TextBox m_ebFastingAvg90; 
 
 	/// <summary>
 	/// Required designer variable.
@@ -1911,6 +2157,10 @@ public class _bg : System.Windows.Forms.Form
 		m_cbxLower.SelectedIndex = 0;
 		SetupListView(m_lvHistory);
 		LoadBgData();
+
+		m_cbxOrient.SelectedIndex = 1;
+		m_cbxDateRange.SelectedIndex = 3;
+		m_cbxFilterType.SelectedIndex = 0;
 	}
 
 	/// <summary>
@@ -1937,6 +2187,7 @@ public class _bg : System.Windows.Forms.Form
 	{
 		this.m_tabc = new System.Windows.Forms.TabControl();
 		this.m_tabEntry = new System.Windows.Forms.TabPage();
+		this.button1 = new System.Windows.Forms.Button();
 		this.m_ebComment = new System.Windows.Forms.TextBox();
 		this.label9 = new System.Windows.Forms.Label();
 		this.m_ebCarbs = new System.Windows.Forms.TextBox();
@@ -1955,15 +2206,24 @@ public class _bg : System.Windows.Forms.Form
 		this.label2 = new System.Windows.Forms.Label();
 		this.label1 = new System.Windows.Forms.Label();
 		this.m_tabAnalysis = new System.Windows.Forms.TabPage();
+		this.groupBox5 = new System.Windows.Forms.GroupBox();
+		this.m_ebA1c90 = new System.Windows.Forms.TextBox();
+		this.m_ebWgtAvg90 = new System.Windows.Forms.TextBox();
+		this.label40 = new System.Windows.Forms.Label();
+		this.label41 = new System.Windows.Forms.Label();
+		this.label42 = new System.Windows.Forms.Label();
+		this.label43 = new System.Windows.Forms.Label();
+		this.m_ebFastingAvg90 = new System.Windows.Forms.TextBox();
+		this.m_ebAvg90 = new System.Windows.Forms.TextBox();
+		this.label13 = new System.Windows.Forms.Label();
+		this.m_cbxDateRange = new System.Windows.Forms.ComboBox();
+		this.m_cbxFilterType = new System.Windows.Forms.ComboBox();
+		this.m_cbxOrient = new System.Windows.Forms.ComboBox();
 		this.m_cbxLower = new System.Windows.Forms.ComboBox();
 		this.m_cbxUpper = new System.Windows.Forms.ComboBox();
 		this.label31 = new System.Windows.Forms.Label();
 		this.label30 = new System.Windows.Forms.Label();
 		this.m_cbShowMeals = new System.Windows.Forms.CheckBox();
-		this.m_rbCustom = new System.Windows.Forms.RadioButton();
-		this.m_rb30Days = new System.Windows.Forms.RadioButton();
-		this.m_rb15Days = new System.Windows.Forms.RadioButton();
-		this.m_rb7Days = new System.Windows.Forms.RadioButton();
 		this.m_ebIntervals = new System.Windows.Forms.TextBox();
 		this.m_ebHigh = new System.Windows.Forms.TextBox();
 		this.m_ebLow = new System.Windows.Forms.TextBox();
@@ -1980,29 +2240,43 @@ public class _bg : System.Windows.Forms.Form
 		this.label29 = new System.Windows.Forms.Label();
 		this.label28 = new System.Windows.Forms.Label();
 		this.groupBox4 = new System.Windows.Forms.GroupBox();
-		this.m_ebFastingAvg7 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg7 = new System.Windows.Forms.TextBox();
+		this.m_ebA1c7 = new System.Windows.Forms.TextBox();
+		this.m_ebWgtAvg7 = new System.Windows.Forms.TextBox();
 		this.label26 = new System.Windows.Forms.Label();
 		this.label27 = new System.Windows.Forms.Label();
+		this.label38 = new System.Windows.Forms.Label();
+		this.label39 = new System.Windows.Forms.Label();
+		this.m_ebFastingAvg7 = new System.Windows.Forms.TextBox();
+		this.m_ebAvg7 = new System.Windows.Forms.TextBox();
 		this.groupBox3 = new System.Windows.Forms.GroupBox();
-		this.m_ebFastingAvg15 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg15 = new System.Windows.Forms.TextBox();
+		this.m_ebA1c15 = new System.Windows.Forms.TextBox();
+		this.m_ebWgtAvg15 = new System.Windows.Forms.TextBox();
 		this.label24 = new System.Windows.Forms.Label();
 		this.label25 = new System.Windows.Forms.Label();
+		this.label32 = new System.Windows.Forms.Label();
+		this.label33 = new System.Windows.Forms.Label();
+		this.m_ebFastingAvg15 = new System.Windows.Forms.TextBox();
+		this.m_ebAvg15 = new System.Windows.Forms.TextBox();
 		this.groupBox2 = new System.Windows.Forms.GroupBox();
-		this.m_ebFastingAvg30 = new System.Windows.Forms.TextBox();
-		this.m_ebAvg30 = new System.Windows.Forms.TextBox();
+		this.m_ebA1c30 = new System.Windows.Forms.TextBox();
+		this.m_ebWgtAvg30 = new System.Windows.Forms.TextBox();
 		this.label20 = new System.Windows.Forms.Label();
 		this.label23 = new System.Windows.Forms.Label();
+		this.label36 = new System.Windows.Forms.Label();
+		this.label37 = new System.Windows.Forms.Label();
+		this.m_ebFastingAvg30 = new System.Windows.Forms.TextBox();
+		this.m_ebAvg30 = new System.Windows.Forms.TextBox();
 		this.groupBox1 = new System.Windows.Forms.GroupBox();
+		this.m_ebA1c = new System.Windows.Forms.TextBox();
+		this.label35 = new System.Windows.Forms.Label();
+		this.m_ebAvgWgt = new System.Windows.Forms.TextBox();
+		this.label34 = new System.Windows.Forms.Label();
 		this.m_ebFastingAvg = new System.Windows.Forms.TextBox();
 		this.m_ebLifetimeAvg = new System.Windows.Forms.TextBox();
 		this.label22 = new System.Windows.Forms.Label();
 		this.label21 = new System.Windows.Forms.Label();
 		this.m_ebFastLength = new System.Windows.Forms.TextBox();
 		this.label14 = new System.Windows.Forms.Label();
-		this.m_pbGraphFast = new System.Windows.Forms.Button();
-		this.label13 = new System.Windows.Forms.Label();
 		this.label12 = new System.Windows.Forms.Label();
 		this.m_cbSnack = new System.Windows.Forms.CheckBox();
 		this.m_cbDinner = new System.Windows.Forms.CheckBox();
@@ -2013,6 +2287,7 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.SuspendLayout();
 		this.m_tabEntry.SuspendLayout();
 		this.m_tabAnalysis.SuspendLayout();
+		this.groupBox5.SuspendLayout();
 		this.groupBox4.SuspendLayout();
 		this.groupBox3.SuspendLayout();
 		this.groupBox2.SuspendLayout();
@@ -2030,13 +2305,14 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.Location = new System.Drawing.Point(16, 24);
 		this.m_tabc.Name = "m_tabc";
 		this.m_tabc.SelectedIndex = 0;
-		this.m_tabc.Size = new System.Drawing.Size(528, 480);
+		this.m_tabc.Size = new System.Drawing.Size(528, 472);
 		this.m_tabc.TabIndex = 0;
 		this.m_tabc.SelectedIndexChanged += new System.EventHandler(this.ChangeTabs);
 		// 
 		// m_tabEntry
 		// 
 		this.m_tabEntry.Controls.AddRange(new System.Windows.Forms.Control[] {
+																				 this.button1,
 																				 this.m_ebComment,
 																				 this.label9,
 																				 this.m_ebCarbs,
@@ -2056,9 +2332,18 @@ public class _bg : System.Windows.Forms.Form
 																				 this.label1});
 		this.m_tabEntry.Location = new System.Drawing.Point(4, 22);
 		this.m_tabEntry.Name = "m_tabEntry";
-		this.m_tabEntry.Size = new System.Drawing.Size(520, 454);
+		this.m_tabEntry.Size = new System.Drawing.Size(520, 446);
 		this.m_tabEntry.TabIndex = 0;
 		this.m_tabEntry.Text = "Data Entry";
+		// 
+		// button1
+		// 
+		this.button1.Location = new System.Drawing.Point(416, 56);
+		this.button1.Name = "button1";
+		this.button1.Size = new System.Drawing.Size(72, 24);
+		this.button1.TabIndex = 17;
+		this.button1.Text = "Read";
+		this.button1.Click += new System.EventHandler(this.ReadFromDevice);
 		// 
 		// m_ebComment
 		// 
@@ -2204,15 +2489,16 @@ public class _bg : System.Windows.Forms.Form
 		// m_tabAnalysis
 		// 
 		this.m_tabAnalysis.Controls.AddRange(new System.Windows.Forms.Control[] {
+																					this.groupBox5,
+																					this.label13,
+																					this.m_cbxDateRange,
+																					this.m_cbxFilterType,
+																					this.m_cbxOrient,
 																					this.m_cbxLower,
 																					this.m_cbxUpper,
 																					this.label31,
 																					this.label30,
 																					this.m_cbShowMeals,
-																					this.m_rbCustom,
-																					this.m_rb30Days,
-																					this.m_rb15Days,
-																					this.m_rb7Days,
 																					this.m_ebIntervals,
 																					this.m_ebHigh,
 																					this.m_ebLow,
@@ -2234,8 +2520,6 @@ public class _bg : System.Windows.Forms.Form
 																					this.groupBox1,
 																					this.m_ebFastLength,
 																					this.label14,
-																					this.m_pbGraphFast,
-																					this.label13,
 																					this.label12,
 																					this.m_cbSnack,
 																					this.m_cbDinner,
@@ -2245,9 +2529,137 @@ public class _bg : System.Windows.Forms.Form
 																					this.m_pbGraph});
 		this.m_tabAnalysis.Location = new System.Drawing.Point(4, 22);
 		this.m_tabAnalysis.Name = "m_tabAnalysis";
-		this.m_tabAnalysis.Size = new System.Drawing.Size(520, 454);
+		this.m_tabAnalysis.Size = new System.Drawing.Size(520, 446);
 		this.m_tabAnalysis.TabIndex = 1;
 		this.m_tabAnalysis.Text = "Analysis";
+		// 
+		// groupBox5
+		// 
+		this.groupBox5.Controls.AddRange(new System.Windows.Forms.Control[] {
+																				this.m_ebA1c90,
+																				this.m_ebWgtAvg90,
+																				this.label40,
+																				this.label41,
+																				this.label42,
+																				this.label43,
+																				this.m_ebFastingAvg90,
+																				this.m_ebAvg90});
+		this.groupBox5.Location = new System.Drawing.Point(152, 304);
+		this.groupBox5.Name = "groupBox5";
+		this.groupBox5.Size = new System.Drawing.Size(136, 64);
+		this.groupBox5.TabIndex = 43;
+		this.groupBox5.TabStop = false;
+		this.groupBox5.Text = "90 Day Averages";
+		this.groupBox5.Enter += new System.EventHandler(this.groupBox5_Enter);
+		// 
+		// m_ebA1c90
+		// 
+		this.m_ebA1c90.Location = new System.Drawing.Point(104, 32);
+		this.m_ebA1c90.Name = "m_ebA1c90";
+		this.m_ebA1c90.Size = new System.Drawing.Size(24, 20);
+		this.m_ebA1c90.TabIndex = 12;
+		this.m_ebA1c90.Text = "5.5";
+		// 
+		// m_ebWgtAvg90
+		// 
+		this.m_ebWgtAvg90.Location = new System.Drawing.Point(72, 32);
+		this.m_ebWgtAvg90.Name = "m_ebWgtAvg90";
+		this.m_ebWgtAvg90.Size = new System.Drawing.Size(24, 20);
+		this.m_ebWgtAvg90.TabIndex = 11;
+		this.m_ebWgtAvg90.Text = "444";
+		// 
+		// label40
+		// 
+		this.label40.Location = new System.Drawing.Point(104, 16);
+		this.label40.Name = "label40";
+		this.label40.Size = new System.Drawing.Size(24, 16);
+		this.label40.TabIndex = 10;
+		this.label40.Text = "a1c";
+		// 
+		// label41
+		// 
+		this.label41.Location = new System.Drawing.Point(72, 16);
+		this.label41.Name = "label41";
+		this.label41.Size = new System.Drawing.Size(24, 16);
+		this.label41.TabIndex = 9;
+		this.label41.Text = "Wgt";
+		// 
+		// label42
+		// 
+		this.label42.Location = new System.Drawing.Point(40, 16);
+		this.label42.Name = "label42";
+		this.label42.Size = new System.Drawing.Size(32, 16);
+		this.label42.TabIndex = 8;
+		this.label42.Text = "Fast";
+		// 
+		// label43
+		// 
+		this.label43.Location = new System.Drawing.Point(16, 16);
+		this.label43.Name = "label43";
+		this.label43.Size = new System.Drawing.Size(24, 16);
+		this.label43.TabIndex = 7;
+		this.label43.Text = "All";
+		// 
+		// m_ebFastingAvg90
+		// 
+		this.m_ebFastingAvg90.Location = new System.Drawing.Point(40, 32);
+		this.m_ebFastingAvg90.Name = "m_ebFastingAvg90";
+		this.m_ebFastingAvg90.Size = new System.Drawing.Size(24, 20);
+		this.m_ebFastingAvg90.TabIndex = 3;
+		this.m_ebFastingAvg90.Text = "444";
+		// 
+		// m_ebAvg90
+		// 
+		this.m_ebAvg90.Location = new System.Drawing.Point(8, 32);
+		this.m_ebAvg90.Name = "m_ebAvg90";
+		this.m_ebAvg90.Size = new System.Drawing.Size(24, 20);
+		this.m_ebAvg90.TabIndex = 1;
+		this.m_ebAvg90.Text = "444";
+		// 
+		// label13
+		// 
+		this.label13.Location = new System.Drawing.Point(8, 200);
+		this.label13.Name = "label13";
+		this.label13.Size = new System.Drawing.Size(496, 16);
+		this.label13.TabIndex = 42;
+		this.label13.Text = "Graph Options";
+		this.label13.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
+		// 
+		// m_cbxDateRange
+		// 
+		this.m_cbxDateRange.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+		this.m_cbxDateRange.Items.AddRange(new object[] {
+															"7 Days",
+															"15 Days",
+															"30 Days",
+															"Custom"});
+		this.m_cbxDateRange.Location = new System.Drawing.Point(232, 104);
+		this.m_cbxDateRange.Name = "m_cbxDateRange";
+		this.m_cbxDateRange.Size = new System.Drawing.Size(88, 21);
+		this.m_cbxDateRange.TabIndex = 41;
+		this.m_cbxDateRange.SelectedIndexChanged += new System.EventHandler(this.SelectDateRange);
+		// 
+		// m_cbxFilterType
+		// 
+		this.m_cbxFilterType.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+		this.m_cbxFilterType.Items.AddRange(new object[] {
+															 "Custom",
+															 "Fasting"});
+		this.m_cbxFilterType.Location = new System.Drawing.Point(384, 56);
+		this.m_cbxFilterType.Name = "m_cbxFilterType";
+		this.m_cbxFilterType.Size = new System.Drawing.Size(128, 21);
+		this.m_cbxFilterType.TabIndex = 40;
+		// 
+		// m_cbxOrient
+		// 
+		this.m_cbxOrient.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+		this.m_cbxOrient.Items.AddRange(new object[] {
+														 "Portrait",
+														 "Landscape"});
+		this.m_cbxOrient.Location = new System.Drawing.Point(16, 160);
+		this.m_cbxOrient.Name = "m_cbxOrient";
+		this.m_cbxOrient.Size = new System.Drawing.Size(128, 21);
+		this.m_cbxOrient.TabIndex = 39;
 		// 
 		// m_cbxLower
 		// 
@@ -2256,7 +2668,7 @@ public class _bg : System.Windows.Forms.Form
 														"Empty",
 														"Graph",
 														"Log"});
-		this.m_cbxLower.Location = new System.Drawing.Point(432, 224);
+		this.m_cbxLower.Location = new System.Drawing.Point(352, 160);
 		this.m_cbxLower.Name = "m_cbxLower";
 		this.m_cbxLower.Size = new System.Drawing.Size(72, 21);
 		this.m_cbxLower.TabIndex = 38;
@@ -2268,14 +2680,14 @@ public class _bg : System.Windows.Forms.Form
 														"Empty",
 														"Graph",
 														"Log"});
-		this.m_cbxUpper.Location = new System.Drawing.Point(432, 200);
+		this.m_cbxUpper.Location = new System.Drawing.Point(216, 160);
 		this.m_cbxUpper.Name = "m_cbxUpper";
 		this.m_cbxUpper.Size = new System.Drawing.Size(72, 21);
 		this.m_cbxUpper.TabIndex = 37;
 		// 
 		// label31
 		// 
-		this.label31.Location = new System.Drawing.Point(368, 232);
+		this.label31.Location = new System.Drawing.Point(288, 164);
 		this.label31.Name = "label31";
 		this.label31.Size = new System.Drawing.Size(64, 23);
 		this.label31.TabIndex = 36;
@@ -2283,7 +2695,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label30
 		// 
-		this.label30.Location = new System.Drawing.Point(368, 208);
+		this.label30.Location = new System.Drawing.Point(152, 164);
 		this.label30.Name = "label30";
 		this.label30.Size = new System.Drawing.Size(64, 23);
 		this.label30.TabIndex = 35;
@@ -2293,50 +2705,15 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		this.m_cbShowMeals.Checked = true;
 		this.m_cbShowMeals.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbShowMeals.Location = new System.Drawing.Point(352, 168);
+		this.m_cbShowMeals.Location = new System.Drawing.Point(16, 248);
 		this.m_cbShowMeals.Name = "m_cbShowMeals";
+		this.m_cbShowMeals.Size = new System.Drawing.Size(128, 24);
 		this.m_cbShowMeals.TabIndex = 19;
-		this.m_cbShowMeals.Text = "Show Meals";
-		// 
-		// m_rbCustom
-		// 
-		this.m_rbCustom.Location = new System.Drawing.Point(240, 192);
-		this.m_rbCustom.Name = "m_rbCustom";
-		this.m_rbCustom.Size = new System.Drawing.Size(64, 24);
-		this.m_rbCustom.TabIndex = 23;
-		this.m_rbCustom.Text = "Custom";
-		this.m_rbCustom.Click += new System.EventHandler(this.EnableCustomDates);
-		// 
-		// m_rb30Days
-		// 
-		this.m_rb30Days.Location = new System.Drawing.Point(160, 192);
-		this.m_rb30Days.Name = "m_rb30Days";
-		this.m_rb30Days.Size = new System.Drawing.Size(64, 24);
-		this.m_rb30Days.TabIndex = 22;
-		this.m_rb30Days.Text = "30 Days";
-		this.m_rb30Days.Click += new System.EventHandler(this.Setup30DayGraph);
-		// 
-		// m_rb15Days
-		// 
-		this.m_rb15Days.Location = new System.Drawing.Point(88, 192);
-		this.m_rb15Days.Name = "m_rb15Days";
-		this.m_rb15Days.Size = new System.Drawing.Size(64, 24);
-		this.m_rb15Days.TabIndex = 21;
-		this.m_rb15Days.Text = "15 Days";
-		this.m_rb15Days.Click += new System.EventHandler(this.Setup15DayGraph);
-		// 
-		// m_rb7Days
-		// 
-		this.m_rb7Days.Location = new System.Drawing.Point(16, 192);
-		this.m_rb7Days.Name = "m_rb7Days";
-		this.m_rb7Days.Size = new System.Drawing.Size(72, 24);
-		this.m_rb7Days.TabIndex = 20;
-		this.m_rb7Days.Text = "&7 Days";
-		this.m_rb7Days.Click += new System.EventHandler(this.Setup7DayGraph);
+		this.m_cbShowMeals.Text = "Connect meal points";
 		// 
 		// m_ebIntervals
 		// 
-		this.m_ebIntervals.Location = new System.Drawing.Point(304, 229);
+		this.m_ebIntervals.Location = new System.Drawing.Point(304, 224);
 		this.m_ebIntervals.Name = "m_ebIntervals";
 		this.m_ebIntervals.Size = new System.Drawing.Size(48, 20);
 		this.m_ebIntervals.TabIndex = 29;
@@ -2344,7 +2721,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebHigh
 		// 
-		this.m_ebHigh.Location = new System.Drawing.Point(192, 229);
+		this.m_ebHigh.Location = new System.Drawing.Point(192, 224);
 		this.m_ebHigh.Name = "m_ebHigh";
 		this.m_ebHigh.Size = new System.Drawing.Size(48, 20);
 		this.m_ebHigh.TabIndex = 27;
@@ -2352,7 +2729,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebLow
 		// 
-		this.m_ebLow.Location = new System.Drawing.Point(72, 229);
+		this.m_ebLow.Location = new System.Drawing.Point(72, 224);
 		this.m_ebLow.Name = "m_ebLow";
 		this.m_ebLow.Size = new System.Drawing.Size(48, 20);
 		this.m_ebLow.TabIndex = 25;
@@ -2360,7 +2737,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label19
 		// 
-		this.label19.Location = new System.Drawing.Point(248, 232);
+		this.label19.Location = new System.Drawing.Point(248, 227);
 		this.label19.Name = "label19";
 		this.label19.Size = new System.Drawing.Size(48, 23);
 		this.label19.TabIndex = 28;
@@ -2368,7 +2745,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label18
 		// 
-		this.label18.Location = new System.Drawing.Point(136, 232);
+		this.label18.Location = new System.Drawing.Point(136, 227);
 		this.label18.Name = "label18";
 		this.label18.Size = new System.Drawing.Size(48, 23);
 		this.label18.TabIndex = 26;
@@ -2376,7 +2753,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label17
 		// 
-		this.label17.Location = new System.Drawing.Point(16, 232);
+		this.label17.Location = new System.Drawing.Point(16, 227);
 		this.label17.Name = "label17";
 		this.label17.Size = new System.Drawing.Size(48, 23);
 		this.label17.TabIndex = 24;
@@ -2384,7 +2761,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebDays
 		// 
-		this.m_ebDays.Location = new System.Drawing.Point(312, 165);
+		this.m_ebDays.Location = new System.Drawing.Point(448, 224);
 		this.m_ebDays.Name = "m_ebDays";
 		this.m_ebDays.Size = new System.Drawing.Size(24, 20);
 		this.m_ebDays.TabIndex = 18;
@@ -2392,23 +2769,23 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label16
 		// 
-		this.label16.Location = new System.Drawing.Point(232, 168);
+		this.label16.Location = new System.Drawing.Point(360, 227);
 		this.label16.Name = "label16";
 		this.label16.TabIndex = 17;
 		this.label16.Text = "Days per Page";
 		// 
 		// label15
 		// 
-		this.label15.Location = new System.Drawing.Point(8, 144);
+		this.label15.Location = new System.Drawing.Point(8, 136);
 		this.label15.Name = "label15";
 		this.label15.Size = new System.Drawing.Size(496, 16);
 		this.label15.TabIndex = 12;
-		this.label15.Text = "All Report Options";
+		this.label15.Text = "Report Options";
 		this.label15.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
 		// 
 		// label11
 		// 
-		this.label11.Location = new System.Drawing.Point(128, 168);
+		this.label11.Location = new System.Drawing.Point(128, 104);
 		this.label11.Name = "label11";
 		this.label11.Size = new System.Drawing.Size(32, 23);
 		this.label11.TabIndex = 15;
@@ -2416,7 +2793,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label10
 		// 
-		this.label10.Location = new System.Drawing.Point(16, 168);
+		this.label10.Location = new System.Drawing.Point(16, 104);
 		this.label10.Name = "label10";
 		this.label10.Size = new System.Drawing.Size(40, 23);
 		this.label10.TabIndex = 13;
@@ -2424,7 +2801,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebLast
 		// 
-		this.m_ebLast.Location = new System.Drawing.Point(160, 165);
+		this.m_ebLast.Location = new System.Drawing.Point(160, 104);
 		this.m_ebLast.Name = "m_ebLast";
 		this.m_ebLast.Size = new System.Drawing.Size(56, 20);
 		this.m_ebLast.TabIndex = 16;
@@ -2432,7 +2809,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// m_ebFirst
 		// 
-		this.m_ebFirst.Location = new System.Drawing.Point(56, 165);
+		this.m_ebFirst.Location = new System.Drawing.Point(56, 104);
 		this.m_ebFirst.Name = "m_ebFirst";
 		this.m_ebFirst.Size = new System.Drawing.Size(48, 20);
 		this.m_ebFirst.TabIndex = 14;
@@ -2440,7 +2817,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label29
 		// 
-		this.label29.Location = new System.Drawing.Point(128, 112);
+		this.label29.Location = new System.Drawing.Point(472, 86);
 		this.label29.Name = "label29";
 		this.label29.Size = new System.Drawing.Size(40, 16);
 		this.label29.TabIndex = 10;
@@ -2448,9 +2825,9 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label28
 		// 
-		this.label28.Location = new System.Drawing.Point(8, 272);
+		this.label28.Location = new System.Drawing.Point(8, 280);
 		this.label28.Name = "label28";
-		this.label28.Size = new System.Drawing.Size(496, 23);
+		this.label28.Size = new System.Drawing.Size(496, 16);
 		this.label28.TabIndex = 30;
 		this.label28.Text = "Statistics";
 		this.label28.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
@@ -2458,190 +2835,334 @@ public class _bg : System.Windows.Forms.Form
 		// groupBox4
 		// 
 		this.groupBox4.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebFastingAvg7,
-																				this.m_ebAvg7,
+																				this.m_ebA1c7,
+																				this.m_ebWgtAvg7,
 																				this.label26,
-																				this.label27});
-		this.groupBox4.Location = new System.Drawing.Point(256, 376);
+																				this.label27,
+																				this.label38,
+																				this.label39,
+																				this.m_ebFastingAvg7,
+																				this.m_ebAvg7});
+		this.groupBox4.Location = new System.Drawing.Point(152, 376);
 		this.groupBox4.Name = "groupBox4";
-		this.groupBox4.Size = new System.Drawing.Size(240, 64);
+		this.groupBox4.Size = new System.Drawing.Size(136, 64);
 		this.groupBox4.TabIndex = 0;
 		this.groupBox4.TabStop = false;
 		this.groupBox4.Text = "7 Day Averages";
 		// 
+		// m_ebA1c7
+		// 
+		this.m_ebA1c7.Location = new System.Drawing.Point(104, 32);
+		this.m_ebA1c7.Name = "m_ebA1c7";
+		this.m_ebA1c7.Size = new System.Drawing.Size(24, 20);
+		this.m_ebA1c7.TabIndex = 16;
+		this.m_ebA1c7.Text = "5.5";
+		// 
+		// m_ebWgtAvg7
+		// 
+		this.m_ebWgtAvg7.Location = new System.Drawing.Point(72, 32);
+		this.m_ebWgtAvg7.Name = "m_ebWgtAvg7";
+		this.m_ebWgtAvg7.Size = new System.Drawing.Size(24, 20);
+		this.m_ebWgtAvg7.TabIndex = 15;
+		this.m_ebWgtAvg7.Text = "444";
+		// 
+		// label26
+		// 
+		this.label26.Location = new System.Drawing.Point(104, 16);
+		this.label26.Name = "label26";
+		this.label26.Size = new System.Drawing.Size(24, 16);
+		this.label26.TabIndex = 14;
+		this.label26.Text = "a1c";
+		// 
+		// label27
+		// 
+		this.label27.Location = new System.Drawing.Point(72, 16);
+		this.label27.Name = "label27";
+		this.label27.Size = new System.Drawing.Size(24, 16);
+		this.label27.TabIndex = 13;
+		this.label27.Text = "Wgt";
+		// 
+		// label38
+		// 
+		this.label38.Location = new System.Drawing.Point(40, 16);
+		this.label38.Name = "label38";
+		this.label38.Size = new System.Drawing.Size(32, 16);
+		this.label38.TabIndex = 12;
+		this.label38.Text = "Fast";
+		// 
+		// label39
+		// 
+		this.label39.Location = new System.Drawing.Point(16, 16);
+		this.label39.Name = "label39";
+		this.label39.Size = new System.Drawing.Size(24, 16);
+		this.label39.TabIndex = 11;
+		this.label39.Text = "All";
+		// 
 		// m_ebFastingAvg7
 		// 
-		this.m_ebFastingAvg7.Location = new System.Drawing.Point(104, 32);
+		this.m_ebFastingAvg7.Location = new System.Drawing.Point(40, 32);
 		this.m_ebFastingAvg7.Name = "m_ebFastingAvg7";
-		this.m_ebFastingAvg7.Size = new System.Drawing.Size(64, 20);
+		this.m_ebFastingAvg7.Size = new System.Drawing.Size(24, 20);
 		this.m_ebFastingAvg7.TabIndex = 2;
 		this.m_ebFastingAvg7.Text = "textBox2";
 		// 
 		// m_ebAvg7
 		// 
-		this.m_ebAvg7.Location = new System.Drawing.Point(104, 8);
+		this.m_ebAvg7.Location = new System.Drawing.Point(8, 32);
 		this.m_ebAvg7.Name = "m_ebAvg7";
-		this.m_ebAvg7.Size = new System.Drawing.Size(64, 20);
+		this.m_ebAvg7.Size = new System.Drawing.Size(24, 20);
 		this.m_ebAvg7.TabIndex = 0;
 		this.m_ebAvg7.Text = "m_ebAvg30";
-		// 
-		// label26
-		// 
-		this.label26.Location = new System.Drawing.Point(8, 32);
-		this.label26.Name = "label26";
-		this.label26.Size = new System.Drawing.Size(48, 16);
-		this.label26.TabIndex = 1;
-		this.label26.Text = "Fasting";
-		// 
-		// label27
-		// 
-		this.label27.Location = new System.Drawing.Point(8, 16);
-		this.label27.Name = "label27";
-		this.label27.Size = new System.Drawing.Size(72, 23);
-		this.label27.TabIndex = 0;
-		this.label27.Text = "All Readings";
 		// 
 		// groupBox3
 		// 
 		this.groupBox3.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebFastingAvg15,
-																				this.m_ebAvg15,
+																				this.m_ebA1c15,
+																				this.m_ebWgtAvg15,
 																				this.label24,
-																				this.label25});
+																				this.label25,
+																				this.label32,
+																				this.label33,
+																				this.m_ebFastingAvg15,
+																				this.m_ebAvg15});
 		this.groupBox3.Location = new System.Drawing.Point(8, 376);
 		this.groupBox3.Name = "groupBox3";
-		this.groupBox3.Size = new System.Drawing.Size(240, 64);
+		this.groupBox3.Size = new System.Drawing.Size(136, 64);
 		this.groupBox3.TabIndex = 33;
 		this.groupBox3.TabStop = false;
 		this.groupBox3.Text = "15 Day Averages";
 		// 
-		// m_ebFastingAvg15
+		// m_ebA1c15
 		// 
-		this.m_ebFastingAvg15.Location = new System.Drawing.Point(104, 32);
-		this.m_ebFastingAvg15.Name = "m_ebFastingAvg15";
-		this.m_ebFastingAvg15.Size = new System.Drawing.Size(64, 20);
-		this.m_ebFastingAvg15.TabIndex = 3;
-		this.m_ebFastingAvg15.Text = "textBox2";
+		this.m_ebA1c15.Location = new System.Drawing.Point(104, 32);
+		this.m_ebA1c15.Name = "m_ebA1c15";
+		this.m_ebA1c15.Size = new System.Drawing.Size(24, 20);
+		this.m_ebA1c15.TabIndex = 16;
+		this.m_ebA1c15.Text = "5.5";
 		// 
-		// m_ebAvg15
+		// m_ebWgtAvg15
 		// 
-		this.m_ebAvg15.Location = new System.Drawing.Point(104, 8);
-		this.m_ebAvg15.Name = "m_ebAvg15";
-		this.m_ebAvg15.Size = new System.Drawing.Size(64, 20);
-		this.m_ebAvg15.TabIndex = 1;
-		this.m_ebAvg15.Text = "m_ebAvg30";
+		this.m_ebWgtAvg15.Location = new System.Drawing.Point(72, 32);
+		this.m_ebWgtAvg15.Name = "m_ebWgtAvg15";
+		this.m_ebWgtAvg15.Size = new System.Drawing.Size(24, 20);
+		this.m_ebWgtAvg15.TabIndex = 15;
+		this.m_ebWgtAvg15.Text = "444";
 		// 
 		// label24
 		// 
-		this.label24.Location = new System.Drawing.Point(8, 32);
+		this.label24.Location = new System.Drawing.Point(104, 16);
 		this.label24.Name = "label24";
-		this.label24.Size = new System.Drawing.Size(48, 16);
-		this.label24.TabIndex = 2;
-		this.label24.Text = "Fasting";
+		this.label24.Size = new System.Drawing.Size(24, 16);
+		this.label24.TabIndex = 14;
+		this.label24.Text = "a1c";
 		// 
 		// label25
 		// 
-		this.label25.Location = new System.Drawing.Point(8, 16);
+		this.label25.Location = new System.Drawing.Point(72, 16);
 		this.label25.Name = "label25";
-		this.label25.Size = new System.Drawing.Size(72, 23);
-		this.label25.TabIndex = 0;
-		this.label25.Text = "All Readings";
+		this.label25.Size = new System.Drawing.Size(24, 16);
+		this.label25.TabIndex = 13;
+		this.label25.Text = "Wgt";
+		// 
+		// label32
+		// 
+		this.label32.Location = new System.Drawing.Point(40, 16);
+		this.label32.Name = "label32";
+		this.label32.Size = new System.Drawing.Size(32, 16);
+		this.label32.TabIndex = 12;
+		this.label32.Text = "Fast";
+		// 
+		// label33
+		// 
+		this.label33.Location = new System.Drawing.Point(16, 16);
+		this.label33.Name = "label33";
+		this.label33.Size = new System.Drawing.Size(24, 16);
+		this.label33.TabIndex = 11;
+		this.label33.Text = "All";
+		// 
+		// m_ebFastingAvg15
+		// 
+		this.m_ebFastingAvg15.Location = new System.Drawing.Point(40, 32);
+		this.m_ebFastingAvg15.Name = "m_ebFastingAvg15";
+		this.m_ebFastingAvg15.Size = new System.Drawing.Size(24, 20);
+		this.m_ebFastingAvg15.TabIndex = 3;
+		this.m_ebFastingAvg15.Text = "444";
+		// 
+		// m_ebAvg15
+		// 
+		this.m_ebAvg15.Location = new System.Drawing.Point(8, 32);
+		this.m_ebAvg15.Name = "m_ebAvg15";
+		this.m_ebAvg15.Size = new System.Drawing.Size(24, 20);
+		this.m_ebAvg15.TabIndex = 1;
+		this.m_ebAvg15.Text = "444";
 		// 
 		// groupBox2
 		// 
 		this.groupBox2.Controls.AddRange(new System.Windows.Forms.Control[] {
-																				this.m_ebFastingAvg30,
-																				this.m_ebAvg30,
+																				this.m_ebA1c30,
+																				this.m_ebWgtAvg30,
 																				this.label20,
-																				this.label23});
-		this.groupBox2.Location = new System.Drawing.Point(256, 304);
+																				this.label23,
+																				this.label36,
+																				this.label37,
+																				this.m_ebFastingAvg30,
+																				this.m_ebAvg30});
+		this.groupBox2.Location = new System.Drawing.Point(304, 304);
 		this.groupBox2.Name = "groupBox2";
-		this.groupBox2.Size = new System.Drawing.Size(240, 64);
+		this.groupBox2.Size = new System.Drawing.Size(136, 64);
 		this.groupBox2.TabIndex = 32;
 		this.groupBox2.TabStop = false;
 		this.groupBox2.Text = "30 Day Averages";
 		// 
-		// m_ebFastingAvg30
+		// m_ebA1c30
 		// 
-		this.m_ebFastingAvg30.Location = new System.Drawing.Point(104, 32);
-		this.m_ebFastingAvg30.Name = "m_ebFastingAvg30";
-		this.m_ebFastingAvg30.Size = new System.Drawing.Size(64, 20);
-		this.m_ebFastingAvg30.TabIndex = 3;
-		this.m_ebFastingAvg30.Text = "textBox2";
+		this.m_ebA1c30.Location = new System.Drawing.Point(104, 32);
+		this.m_ebA1c30.Name = "m_ebA1c30";
+		this.m_ebA1c30.Size = new System.Drawing.Size(24, 20);
+		this.m_ebA1c30.TabIndex = 12;
+		this.m_ebA1c30.Text = "5.5";
 		// 
-		// m_ebAvg30
+		// m_ebWgtAvg30
 		// 
-		this.m_ebAvg30.Location = new System.Drawing.Point(104, 8);
-		this.m_ebAvg30.Name = "m_ebAvg30";
-		this.m_ebAvg30.Size = new System.Drawing.Size(64, 20);
-		this.m_ebAvg30.TabIndex = 1;
-		this.m_ebAvg30.Text = "m_ebAvg30";
+		this.m_ebWgtAvg30.Location = new System.Drawing.Point(72, 32);
+		this.m_ebWgtAvg30.Name = "m_ebWgtAvg30";
+		this.m_ebWgtAvg30.Size = new System.Drawing.Size(24, 20);
+		this.m_ebWgtAvg30.TabIndex = 11;
+		this.m_ebWgtAvg30.Text = "444";
 		// 
 		// label20
 		// 
-		this.label20.Location = new System.Drawing.Point(8, 32);
+		this.label20.Location = new System.Drawing.Point(104, 16);
 		this.label20.Name = "label20";
-		this.label20.Size = new System.Drawing.Size(48, 16);
-		this.label20.TabIndex = 2;
-		this.label20.Text = "Fasting";
+		this.label20.Size = new System.Drawing.Size(24, 16);
+		this.label20.TabIndex = 10;
+		this.label20.Text = "a1c";
 		// 
 		// label23
 		// 
-		this.label23.Location = new System.Drawing.Point(8, 16);
+		this.label23.Location = new System.Drawing.Point(72, 16);
 		this.label23.Name = "label23";
-		this.label23.Size = new System.Drawing.Size(72, 23);
-		this.label23.TabIndex = 0;
-		this.label23.Text = "All Readings";
+		this.label23.Size = new System.Drawing.Size(24, 16);
+		this.label23.TabIndex = 9;
+		this.label23.Text = "Wgt";
+		// 
+		// label36
+		// 
+		this.label36.Location = new System.Drawing.Point(40, 16);
+		this.label36.Name = "label36";
+		this.label36.Size = new System.Drawing.Size(32, 16);
+		this.label36.TabIndex = 8;
+		this.label36.Text = "Fast";
+		// 
+		// label37
+		// 
+		this.label37.Location = new System.Drawing.Point(16, 16);
+		this.label37.Name = "label37";
+		this.label37.Size = new System.Drawing.Size(24, 16);
+		this.label37.TabIndex = 7;
+		this.label37.Text = "All";
+		// 
+		// m_ebFastingAvg30
+		// 
+		this.m_ebFastingAvg30.Location = new System.Drawing.Point(40, 32);
+		this.m_ebFastingAvg30.Name = "m_ebFastingAvg30";
+		this.m_ebFastingAvg30.Size = new System.Drawing.Size(24, 20);
+		this.m_ebFastingAvg30.TabIndex = 3;
+		this.m_ebFastingAvg30.Text = "444";
+		// 
+		// m_ebAvg30
+		// 
+		this.m_ebAvg30.Location = new System.Drawing.Point(8, 32);
+		this.m_ebAvg30.Name = "m_ebAvg30";
+		this.m_ebAvg30.Size = new System.Drawing.Size(24, 20);
+		this.m_ebAvg30.TabIndex = 1;
+		this.m_ebAvg30.Text = "444";
 		// 
 		// groupBox1
 		// 
 		this.groupBox1.Controls.AddRange(new System.Windows.Forms.Control[] {
+																				this.m_ebA1c,
+																				this.label35,
+																				this.m_ebAvgWgt,
+																				this.label34,
 																				this.m_ebFastingAvg,
 																				this.m_ebLifetimeAvg,
 																				this.label22,
 																				this.label21});
 		this.groupBox1.Location = new System.Drawing.Point(8, 304);
 		this.groupBox1.Name = "groupBox1";
-		this.groupBox1.Size = new System.Drawing.Size(240, 64);
+		this.groupBox1.Size = new System.Drawing.Size(136, 64);
 		this.groupBox1.TabIndex = 31;
 		this.groupBox1.TabStop = false;
 		this.groupBox1.Text = "Lifetime Averages";
 		// 
+		// m_ebA1c
+		// 
+		this.m_ebA1c.Location = new System.Drawing.Point(104, 32);
+		this.m_ebA1c.Name = "m_ebA1c";
+		this.m_ebA1c.Size = new System.Drawing.Size(24, 20);
+		this.m_ebA1c.TabIndex = 7;
+		this.m_ebA1c.Text = "5.5";
+		// 
+		// label35
+		// 
+		this.label35.Location = new System.Drawing.Point(104, 16);
+		this.label35.Name = "label35";
+		this.label35.Size = new System.Drawing.Size(24, 16);
+		this.label35.TabIndex = 6;
+		this.label35.Text = "a1c";
+		// 
+		// m_ebAvgWgt
+		// 
+		this.m_ebAvgWgt.Location = new System.Drawing.Point(72, 32);
+		this.m_ebAvgWgt.Name = "m_ebAvgWgt";
+		this.m_ebAvgWgt.Size = new System.Drawing.Size(24, 20);
+		this.m_ebAvgWgt.TabIndex = 5;
+		this.m_ebAvgWgt.Text = "444";
+		// 
+		// label34
+		// 
+		this.label34.Location = new System.Drawing.Point(72, 16);
+		this.label34.Name = "label34";
+		this.label34.Size = new System.Drawing.Size(24, 16);
+		this.label34.TabIndex = 4;
+		this.label34.Text = "Wgt";
+		// 
 		// m_ebFastingAvg
 		// 
-		this.m_ebFastingAvg.Location = new System.Drawing.Point(104, 32);
+		this.m_ebFastingAvg.Location = new System.Drawing.Point(40, 32);
 		this.m_ebFastingAvg.Name = "m_ebFastingAvg";
-		this.m_ebFastingAvg.Size = new System.Drawing.Size(64, 20);
+		this.m_ebFastingAvg.Size = new System.Drawing.Size(24, 20);
 		this.m_ebFastingAvg.TabIndex = 3;
-		this.m_ebFastingAvg.Text = "textBox2";
+		this.m_ebFastingAvg.Text = "444";
 		// 
 		// m_ebLifetimeAvg
 		// 
-		this.m_ebLifetimeAvg.Location = new System.Drawing.Point(104, 8);
+		this.m_ebLifetimeAvg.Location = new System.Drawing.Point(8, 32);
 		this.m_ebLifetimeAvg.Name = "m_ebLifetimeAvg";
-		this.m_ebLifetimeAvg.Size = new System.Drawing.Size(64, 20);
+		this.m_ebLifetimeAvg.Size = new System.Drawing.Size(24, 20);
 		this.m_ebLifetimeAvg.TabIndex = 1;
-		this.m_ebLifetimeAvg.Text = "textBox1";
+		this.m_ebLifetimeAvg.Text = "444";
 		// 
 		// label22
 		// 
-		this.label22.Location = new System.Drawing.Point(8, 32);
+		this.label22.Location = new System.Drawing.Point(40, 16);
 		this.label22.Name = "label22";
-		this.label22.Size = new System.Drawing.Size(48, 16);
+		this.label22.Size = new System.Drawing.Size(32, 16);
 		this.label22.TabIndex = 2;
-		this.label22.Text = "Fasting";
+		this.label22.Text = "Fast";
 		// 
 		// label21
 		// 
-		this.label21.Location = new System.Drawing.Point(8, 16);
+		this.label21.Location = new System.Drawing.Point(16, 16);
 		this.label21.Name = "label21";
-		this.label21.Size = new System.Drawing.Size(72, 23);
+		this.label21.Size = new System.Drawing.Size(24, 16);
 		this.label21.TabIndex = 0;
-		this.label21.Text = "All Readings";
+		this.label21.Text = "All";
 		// 
 		// m_ebFastLength
 		// 
-		this.m_ebFastLength.Location = new System.Drawing.Point(88, 108);
+		this.m_ebFastLength.Location = new System.Drawing.Point(432, 83);
 		this.m_ebFastLength.Name = "m_ebFastLength";
 		this.m_ebFastLength.Size = new System.Drawing.Size(32, 20);
 		this.m_ebFastLength.TabIndex = 9;
@@ -2649,44 +3170,26 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		// label14
 		// 
-		this.label14.Location = new System.Drawing.Point(16, 112);
+		this.label14.Location = new System.Drawing.Point(360, 86);
 		this.label14.Name = "label14";
 		this.label14.Size = new System.Drawing.Size(96, 24);
 		this.label14.TabIndex = 8;
 		this.label14.Text = "Fast Length:";
 		// 
-		// m_pbGraphFast
-		// 
-		this.m_pbGraphFast.Location = new System.Drawing.Point(432, 112);
-		this.m_pbGraphFast.Name = "m_pbGraphFast";
-		this.m_pbGraphFast.Size = new System.Drawing.Size(72, 23);
-		this.m_pbGraphFast.TabIndex = 11;
-		this.m_pbGraphFast.Text = "Generate";
-		this.m_pbGraphFast.Click += new System.EventHandler(this.GraphFast);
-		// 
-		// label13
-		// 
-		this.label13.Location = new System.Drawing.Point(8, 88);
-		this.label13.Name = "label13";
-		this.label13.Size = new System.Drawing.Size(496, 23);
-		this.label13.TabIndex = 7;
-		this.label13.Text = "Fasting Reports";
-		this.label13.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
-		// 
 		// label12
 		// 
-		this.label12.Location = new System.Drawing.Point(8, 8);
+		this.label12.Location = new System.Drawing.Point(8, 32);
 		this.label12.Name = "label12";
 		this.label12.Size = new System.Drawing.Size(496, 23);
 		this.label12.TabIndex = 0;
-		this.label12.Text = "Custom Reports";
+		this.label12.Text = "Filter Options";
 		this.label12.Paint += new System.Windows.Forms.PaintEventHandler(this.RenderWithLine);
 		// 
 		// m_cbSnack
 		// 
 		this.m_cbSnack.Checked = true;
 		this.m_cbSnack.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbSnack.Location = new System.Drawing.Point(200, 32);
+		this.m_cbSnack.Location = new System.Drawing.Point(200, 56);
 		this.m_cbSnack.Name = "m_cbSnack";
 		this.m_cbSnack.TabIndex = 3;
 		this.m_cbSnack.Text = "Snack";
@@ -2695,7 +3198,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		this.m_cbDinner.Checked = true;
 		this.m_cbDinner.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbDinner.Location = new System.Drawing.Point(128, 48);
+		this.m_cbDinner.Location = new System.Drawing.Point(128, 72);
 		this.m_cbDinner.Name = "m_cbDinner";
 		this.m_cbDinner.TabIndex = 5;
 		this.m_cbDinner.Text = "Dinner";
@@ -2704,7 +3207,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		this.m_cbLunch.Checked = true;
 		this.m_cbLunch.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbLunch.Location = new System.Drawing.Point(128, 32);
+		this.m_cbLunch.Location = new System.Drawing.Point(128, 56);
 		this.m_cbLunch.Name = "m_cbLunch";
 		this.m_cbLunch.TabIndex = 2;
 		this.m_cbLunch.Text = "Lunch";
@@ -2713,7 +3216,7 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		this.m_cbBreakfast.Checked = true;
 		this.m_cbBreakfast.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbBreakfast.Location = new System.Drawing.Point(16, 48);
+		this.m_cbBreakfast.Location = new System.Drawing.Point(16, 72);
 		this.m_cbBreakfast.Name = "m_cbBreakfast";
 		this.m_cbBreakfast.TabIndex = 4;
 		this.m_cbBreakfast.Text = "Breakfast";
@@ -2722,14 +3225,14 @@ public class _bg : System.Windows.Forms.Form
 		// 
 		this.m_cbSpot.Checked = true;
 		this.m_cbSpot.CheckState = System.Windows.Forms.CheckState.Checked;
-		this.m_cbSpot.Location = new System.Drawing.Point(16, 32);
+		this.m_cbSpot.Location = new System.Drawing.Point(16, 56);
 		this.m_cbSpot.Name = "m_cbSpot";
 		this.m_cbSpot.TabIndex = 1;
 		this.m_cbSpot.Text = "SpotTests";
 		// 
 		// m_pbGraph
 		// 
-		this.m_pbGraph.Location = new System.Drawing.Point(432, 32);
+		this.m_pbGraph.Location = new System.Drawing.Point(440, 8);
 		this.m_pbGraph.Name = "m_pbGraph";
 		this.m_pbGraph.Size = new System.Drawing.Size(72, 24);
 		this.m_pbGraph.TabIndex = 6;
@@ -2747,6 +3250,7 @@ public class _bg : System.Windows.Forms.Form
 		this.m_tabc.ResumeLayout(false);
 		this.m_tabEntry.ResumeLayout(false);
 		this.m_tabAnalysis.ResumeLayout(false);
+		this.groupBox5.ResumeLayout(false);
 		this.groupBox4.ResumeLayout(false);
 		this.groupBox3.ResumeLayout(false);
 		this.groupBox2.ResumeLayout(false);
@@ -2901,6 +3405,10 @@ public class _bg : System.Windows.Forms.Form
 			lvi.SubItems[2].Text = bge.Reading.ToString();
 			lvi.SubItems[1].Text = BGE.StringFromReadingType(bge.Type);
 			lvi.SubItems[0].Text = bge.Date.ToString();
+			if (bge.Type == BGE.ReadingType.New)
+				lvi.BackColor = Color.Yellow;
+			else
+				lvi.BackColor = m_lvHistory.BackColor;
 			}
 	}
 
@@ -2921,22 +3429,49 @@ public class _bg : System.Windows.Forms.Form
 		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
 		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
 		lvi.SubItems.Add(new ListViewItem.ListViewSubItem());
+		if (bge != null && bge.Type == BGE.ReadingType.New)
+			lvi.BackColor = Color.Yellow;
 		m_lvHistory.Items.Add(lvi);
 		UpdateBge(bge, lvi);
 	}
 
-	/* A D D  E N T R Y */
-	/*----------------------------------------------------------------------------
-		%%Function: AddEntry
-		%%Qualified: bg._bg.AddEntry
-		%%Contact: rlittle
+	void AddEntryCore(BGE bge, bool fFromDevice)
+	{
+		BGE bgeCurrent = m_bgeCurrent;
 
-		
-	----------------------------------------------------------------------------*/
-	private void AddEntry(object sender, System.EventArgs e) 
-	{  
-		int nCarbs = m_ebCarbs.Text.Length > 0 ? Int32.Parse(m_ebCarbs.Text) : 0;
-		BGE bge = new BGE(m_ebDate.Text, m_ebTime.Text, BGE.ReadingTypeFromString(m_cbxType.Text), Int32.Parse(m_ebReading.Text), nCarbs, m_ebComment.Text);
+		if (fFromDevice)
+			{
+			int iKey = m_slbge.IndexOfKey(bge.Date.ToString("s"));
+
+			if (iKey >= 0)
+				{
+				bgeCurrent = (BGE)m_slbge.GetByIndex(iKey);
+
+				if (bgeCurrent.Reading == bge.Reading)
+					// readings match as does the date; nothing to do
+					return;
+
+				MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + ", bgeNew.Reading = " + bge.Reading.ToString());
+				return;
+				}
+			// no match yet...look for a "close" match
+			DateTime dttm = new DateTime(bge.Date.Year, bge.Date.Month, bge.Date.Day, bge.Date.Hour, bge.Date.Minute, 0);
+			iKey = m_slbge.IndexOfKey(dttm.ToString("s"));
+			if (iKey >= 0)
+				{
+				//ooh a match.  update this one if the readings match
+				bgeCurrent = (BGE)m_slbge.GetByIndex(iKey);
+
+				if (bgeCurrent.Reading != bge.Reading)
+					{
+					MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeCurrent.Reading.ToString() + ", bgeNew.Reading = " + bge.Reading.ToString());
+					return;
+					}
+				// otherwise, fallthrough and do the update
+				bge.Comment = bgeCurrent.Comment;
+				bge.Type = bgeCurrent.Type;
+				}
+			}
 
 		XmlNode nodeReading = m_dom.CreateElement("", "reading", "http://www.thetasoft.com/schemas/bg");
 		XmlNode nodeBg = m_dom.CreateElement("", "bg", "http://www.thetasoft.com/schemas/bg");
@@ -2954,7 +3489,7 @@ public class _bg : System.Windows.Forms.Form
 
 		nodeBg.InnerText = bge.Reading.ToString();
 		nodeDate.InnerText = bge.Date.ToString("d");
-		nodeTime.InnerText = bge.Date.ToString("t", DateTimeFormatInfo.InvariantInfo);
+		nodeTime.InnerText = bge.Date.ToString("T", DateTimeFormatInfo.InvariantInfo);
 		nodeReading.AppendChild(nodeDate);
 		nodeReading.AppendChild(nodeTime);
 		nodeReading.AppendChild(nodeBg);
@@ -2973,28 +3508,84 @@ public class _bg : System.Windows.Forms.Form
 		nodeReading.Attributes.Append(m_dom.CreateAttribute("type"));
 		nodeReading.Attributes["type"].Value = BGE.StringFromReadingType(bge.Type);
 
-		if (m_bgeCurrent == null)
+		if (bgeCurrent == null)
 			{
-			m_slbge.Add(bge.Date.ToString("s"), bge);
+			int iKey;
+			if ((iKey = m_slbge.IndexOfKey(bge.Date.ToString("s"))) >= 0)
+				{
+				if (!fFromDevice)
+					{
+					MessageBox.Show("Duplicate entry detected!");
+					return;
+					}
+
+				BGE bgeOld = (BGE)m_slbge.GetByIndex(iKey);
+				if (bgeOld.Reading == bge.Reading)
+					{
+					// readings match, so does date, do nothing
+					return;
+					}
+
+				MessageBox.Show("Conflicting entry read from device!  bgeOld.Reading = " + bgeOld.Reading.ToString() + ", bgeNew.Reading = " + bge.Reading.ToString());
+				return;
+				}
+
 			AddBge(bge);
-	
+			m_slbge.Add(bge.Date.ToString("s"), bge);
 			m_dom.SelectSingleNode("/b:bg", m_nsmgr).AppendChild(nodeReading);
 			m_dom.Save("c:\\docs\\bg.xml");
 			}
 		else
 			{
-			XmlNode node = m_dom.SelectSingleNode("/b:bg/b:reading[b:date='"+m_bgeCurrent.Date.ToString("d")+"' and b:time='"+m_bgeCurrent.Date.ToString("t", DateTimeFormatInfo.InvariantInfo)+"']", m_nsmgr);
+			XmlNode node = m_dom.SelectSingleNode("/b:bg/b:reading[b:date='"+bgeCurrent.Date.ToString("d")+"' and b:time='"+bgeCurrent.Date.ToString("T", DateTimeFormatInfo.InvariantInfo)+"']", m_nsmgr);
 			XmlNode nodeRoot = m_dom.SelectSingleNode("/b:bg", m_nsmgr);
 
 			nodeRoot.RemoveChild(node);
 			nodeRoot.AppendChild(nodeReading);
-			
+
 			// we need to edit the current item.
-			m_bgeCurrent.SetTo(bge);	// this takes care of m_slbge
-			UpdateBge(m_bgeCurrent, m_lvHistory.SelectedItems[0]);				// this handles updating the listbox
+			bgeCurrent.SetTo(bge);	// this takes care of m_slbge
+			ListViewItem lvi = null;
+
+			if (bgeCurrent != m_bgeCurrent)
+				{
+				foreach (ListViewItem lviT in m_lvHistory.Items)
+					{
+					if (((BGE)lviT.Tag) == bgeCurrent)
+						{
+						lvi = lviT;
+						break;
+						}
+					}
+				if (lvi == null)
+					MessageBox.Show("Couldn't find matching LVI for BGE");
+				}
+			else
+				lvi = m_lvHistory.SelectedItems[0];
+
+			UpdateBge(bgeCurrent, lvi);				// this handles updating the listbox
+			if (fFromDevice)
+				lvi.BackColor = Color.LightBlue;
 			m_dom.Save("c:\\docs\\bg.xml");
 			}
+
 		m_fDirtyStats = true;
+	}
+
+	/* A D D  E N T R Y */
+	/*----------------------------------------------------------------------------
+		%%Function: AddEntry
+		%%Qualified: bg._bg.AddEntry
+		%%Contact: rlittle
+
+		
+	----------------------------------------------------------------------------*/
+	private void AddEntry(object sender, System.EventArgs e) 
+	{  
+		int nCarbs = m_ebCarbs.Text.Length > 0 ? Int32.Parse(m_ebCarbs.Text) : 0;
+		BGE bge = new BGE(m_ebDate.Text, m_ebTime.Text, BGE.ReadingTypeFromString(m_cbxType.Text), Int32.Parse(m_ebReading.Text), nCarbs, m_ebComment.Text);
+
+		AddEntryCore(bge, false);
 	}
 
 	/* H A N D L E  C O L U M N */
@@ -3027,7 +3618,7 @@ public class _bg : System.Windows.Forms.Form
 		if (bge == null)
 			{
 			m_ebDate.Text = System.DateTime.Now.ToString("d");
-			m_ebTime.Text = System.DateTime.Now.ToString("t", DateTimeFormatInfo.InvariantInfo);
+			m_ebTime.Text = System.DateTime.Now.ToString("T", DateTimeFormatInfo.InvariantInfo);
 			m_ebComment.Text = "";
 			m_cbxType.Text = "SpotTest";
 			m_ebReading.Text = "";
@@ -3038,7 +3629,7 @@ public class _bg : System.Windows.Forms.Form
 		else
 			{
 			m_ebDate.Text = bge.Date.ToString("d");
-			m_ebTime.Text = bge.Date.ToString("t", DateTimeFormatInfo.InvariantInfo);
+			m_ebTime.Text = bge.Date.ToString("T", DateTimeFormatInfo.InvariantInfo);
 			m_ebComment.Text = bge.Comment;
 			m_ebReading.Text = bge.Reading.ToString();
 			if (bge.Carbs != 0)
@@ -3079,16 +3670,18 @@ public class _bg : System.Windows.Forms.Form
 
 
 	}
-		
-	private void DoGraph(object sender, System.EventArgs e) 
+
+	SortedList SlbgeCalcCustom()
 	{
-		BgGraph bgg = new BgGraph();
 		SortedList slbge = new SortedList();
 		DateTime dttmFirst = DateTime.Parse(m_ebFirst.Text);
 		DateTime dttmLast = DateTime.Parse(m_ebLast.Text).AddDays(1);
 
 		foreach (BGE bge in m_slbge.Values)
 			{
+			if (bge.Type == BGE.ReadingType.Control)
+				continue;
+
 			if (bge.Date < dttmFirst)
 				continue;
 
@@ -3120,7 +3713,26 @@ public class _bg : System.Windows.Forms.Form
 				}
 			slbge.Add(bge.Date.ToString("s"), bge);
 			}
+		return slbge;
+	}
 
+	/* D O  G R A P H */
+	/*----------------------------------------------------------------------------
+		%%Function: DoGraph
+		%%Qualified: bg._bg.DoGraph
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	private void DoGraph(object sender, System.EventArgs e) 
+	{
+		SortedList slbge;
+
+		if (m_cbxFilterType.Text == "Fasting")
+            slbge = SlbgeCalcFasting();
+		else
+			slbge = SlbgeCalcCustom();
+
+		BgGraph bgg = new BgGraph();
 		BgGraph.BoxView bvUpper, bvLower;
 
 		bvUpper = BgGraph.BvFromString(m_cbxUpper.Text);
@@ -3151,15 +3763,18 @@ public class _bg : System.Windows.Forms.Form
 		if (m_ebHigh.Text.Length > 0)
 			nHigh = Int32.Parse(m_ebHigh.Text);
 
-		bgg.SetBounds(nLow, nHigh, nDays, nIntervals, m_cbShowMeals.Checked);
+		bool fLandscape = true;
+
+		if (m_cbxOrient.Text == "Portrait")
+			fLandscape = false;
+
+		bgg.SetBounds(nLow, nHigh, nDays, nIntervals, m_cbShowMeals.Checked, fLandscape);
 	}
 
-	private void GraphFast(object sender, System.EventArgs e) 
+	SortedList SlbgeCalcFasting()
 	{
 		DateTime dttmFirst = DateTime.Parse(m_ebFirst.Text);
 		DateTime dttmLast = DateTime.Parse(m_ebLast.Text).AddDays(1);
-
-		BgGraph bgg = new BgGraph();
 		SortedList slbge = new SortedList();
 
 		int nFastLength = 8;
@@ -3173,6 +3788,9 @@ public class _bg : System.Windows.Forms.Form
 
 		foreach (BGE bge in m_slbge.Values)
 			{
+			if (bge.Type == BGE.ReadingType.Control)
+				continue;
+
 			// see if this one is a fasting
 			if (bge.Date > dttmNextFast)
 				{
@@ -3189,18 +3807,16 @@ public class _bg : System.Windows.Forms.Form
 				dttmNextFast = bge.Date.AddHours((double)nFastLength);
 				}
 			}
-		BgGraph.BoxView bvUpper, bvLower;
-
-		bvUpper = BgGraph.BvFromString(m_cbxUpper.Text);
-		bvLower = BgGraph.BvFromString(m_cbxLower.Text);
-
-		bgg.SetGraphicViews(bvUpper, bvLower);
-		SetGraphBounds(bgg);
-		bgg.SetDataPoints(slbge);
-		bgg.CalcGraph();
-		bgg.ShowDialog();
+		return slbge;
 	}
 
+	/* R E N D E R  W I T H  L I N E */
+	/*----------------------------------------------------------------------------
+		%%Function: RenderWithLine
+		%%Qualified: bg._bg.RenderWithLine
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	private void RenderWithLine(object sender, System.Windows.Forms.PaintEventArgs e)
 	{
 		Label lbl = (Label)sender;
@@ -3221,6 +3837,8 @@ public class _bg : System.Windows.Forms.Form
 	private bool m_fDirtyStats = true;
 	private int m_nLifetimeAverage = 0;
 	private int m_nLifetimeFastingAverage = 0;
+	private int m_nLifetimeAverageWgt = 0;
+
 	private int m_n30DayAverage = 0;
 	private int m_n30DayFastingAverage = 0;
 	private int m_n15DayAverage = 0;
@@ -3258,10 +3876,105 @@ public class _bg : System.Windows.Forms.Form
 		return nCarbs;
 	}
 
+	class STN
+	{
+		public int nTotal;
+		public int cTotal;
+
+		public int nFastTotal;
+		public int cFastTotal;
+
+		public Int64 nWgtTotal;
+		public Int64 cWgtTotal;
+
+		public TextBox ebAvg;
+		public TextBox ebFast;
+		public TextBox ebWgt;
+		public TextBox ebA1c;
+
+		public DateTime dttmCutoff;
+
+		public STN(TextBox ebAvgIn, TextBox ebFastIn, TextBox ebWgtIn, TextBox ebA1cIn, DateTime dttmCutoffIn)
+		{
+			nTotal = cTotal = nFastTotal = cFastTotal = 0;
+			nWgtTotal = cWgtTotal = 0;
+
+			ebAvg = ebAvgIn;
+			ebFast = ebFastIn;
+			ebWgt = ebWgtIn;
+			ebA1c = ebA1cIn;
+			dttmCutoff = dttmCutoffIn;
+		}
+
+		public float A1c
+		{
+			get
+			{
+				int nAvg = (int)(nWgtTotal / cWgtTotal);
+
+				float dA1c = (nAvg + 77.3f) / 35.6f;
+				return dA1c;
+			}
+		}
+
+		public int Avg
+		{
+			get
+			{
+				return  nTotal / cTotal;
+			}
+		}
+
+		public int FastAvg
+		{
+			get
+			{
+				return nFastTotal / cFastTotal;
+			}
+		}
+
+		public int WgtAvg
+		{
+			get
+			{
+				return (int)(nWgtTotal / cWgtTotal);
+			}
+		}
+
+		public void SetText()
+		{
+			ebAvg.Text = Avg.ToString();
+			ebFast.Text = FastAvg.ToString();
+			ebWgt.Text = WgtAvg.ToString();
+			ebA1c.Text = A1c.ToString();
+		}
+
+	};
+
+	/* C A L C  S T A T S */
+	/*----------------------------------------------------------------------------
+		%%Function: CalcStats
+		%%Qualified: bg._bg.CalcStats
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
 	private void CalcStats()
 	{
+		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
+
+		DateTime dttm90 = bgeLast.Date.AddDays(-90);
+		DateTime dttm30 = bgeLast.Date.AddDays(-30);
+		DateTime dttm15 = bgeLast.Date.AddDays(-15);
+		DateTime dttm7 = bgeLast.Date.AddDays(-7);
+
 		// switching to analysis.  If anything is dirty, then recalc
 		// the stats
+		STN []rgstn = new STN[] 
+			{ new STN(m_ebLifetimeAvg, m_ebFastingAvg, m_ebAvgWgt, m_ebA1c, DateTime.Parse("1/1/1900")),
+			  new STN(m_ebAvg90, m_ebFastingAvg90, m_ebWgtAvg90, m_ebA1c90, dttm90),
+			  new STN(m_ebAvg30, m_ebFastingAvg30, m_ebWgtAvg30, m_ebA1c30, dttm30),
+			  new STN(m_ebAvg15, m_ebFastingAvg15, m_ebWgtAvg15, m_ebA1c15, dttm15),
+			  new STN(m_ebAvg7, m_ebFastingAvg7, m_ebWgtAvg7, m_ebA1c7, dttm7) };
 
 		int nFastLength = 8;
 
@@ -3271,12 +3984,23 @@ public class _bg : System.Windows.Forms.Form
 		DateTime dttmNextFast = DateTime.Parse("1/1/1900 12:00 AM");
 		DateTime dttmNextMealCheckLow = DateTime.Parse("1/1/1900 12:00 AM");
 		DateTime dttmNextMealCheckHigh = DateTime.Parse("1/1/1900 12:00 AM");
+		DateTime dttmLastWgt = DateTime.Parse("1/1/1900 12:00 AM");
+		DateTime dttmStop = DateTime.Parse("9/9/2004");
+
+		int nLastWgt = 0;
+		BGE bgePrev = null;
 
 		int nTotalFastingLifetime = 0;
 		int cFastingLifetime = 0;
 
 		int nTotalLifetime = 0;
 		int cLifetime = 0;
+
+		Int64 nWgtCur = 0;
+		Int64 cWgtCur = 0;
+
+		Int64 nTotalLifetimeWgt = 0;
+		Int64 cTotalLifetimeWgt = 0;
 
 		int nTotalFasting30 = 0;
 		int cFasting30 = 0;
@@ -3297,11 +4021,6 @@ public class _bg : System.Windows.Forms.Form
 		int c7 = 0;
 
 
-		BGE bgeLast = (BGE)m_slbge.GetByIndex(m_slbge.Values.Count - 1);
-		DateTime dttm30 = bgeLast.Date.AddDays(-30);
-		DateTime dttm15 = bgeLast.Date.AddDays(-15);
-		DateTime dttm7 = bgeLast.Date.AddDays(-7);
-
 		// we are interesting in keeping track of the last 4 hours of carb
 		// intake.
 		SortedList slbgeCarbs = new SortedList();
@@ -3309,6 +4028,9 @@ public class _bg : System.Windows.Forms.Form
 
 		foreach (BGE bge in m_slbge.Values)
 			{
+			if (bge.Type == BGE.ReadingType.Control)
+				continue;
+
 			int nCarbs = UpdateCarbList(bge, ref slbgeCarbs);
 			
 			if (dttmLastCarb.Year != 1900)
@@ -3324,7 +4046,90 @@ public class _bg : System.Windows.Forms.Form
 				{
 				nTotalLifetime += bge.Reading;
 				cLifetime++;
-	
+
+				nWgtCur = cWgtCur = 0;
+
+				if (nLastWgt != 0)//  && bge.Date < dttmStop)
+					{
+					TimeSpan ts = bge.Date.Subtract(dttmLastWgt);
+					Int64 nHours = ((Int64)(ts.TotalMinutes * 100) / 60);
+					Int64 nWgtEstCur = 0;
+					Int64 cWgtEstCur = 0;
+
+					if (bgePrev.Carbs > 0 && ts.TotalMinutes > 90)
+						{
+						// if the readings since the carb were > 1.5 hours, we can 
+						// assume we didn't capture the spike.  use a guess of 20bgc rise
+						// for each carb
+
+						Int64 nRise;
+
+						if (ts.TotalMinutes > 90)
+							{
+							nRise = nLastWgt + bgePrev.Carbs * 40;
+							nWgtEstCur = (Int64)nRise * (cWgtEstCur = (Int64)(90 * 100 / 60));
+
+							nHours -= cWgtEstCur;
+							}
+
+						// assume that a greater reading immediately following a "carbs" entry
+						// will be higher previous to this reading
+						if (bge.Reading > bgeLast.Reading)
+							{
+							// don't let the previous reading (which was pre-meal) get weighted
+							// as such; treat the larger reading (post-meal) as the average)
+							nLastWgt = bge.Reading;
+							}
+						}
+					else
+						{
+						// if the current reading is higher than the previous, assume its
+						// been that way for 1/2 of the time
+						if (bge.Reading > bgeLast.Reading)
+							{
+							cWgtEstCur = (Int64)((ts.TotalMinutes * 100) / 60 / 2);
+							nHours -= cWgtEstCur;
+
+							nWgtEstCur = (bge.Reading * cWgtEstCur);
+							}
+						}
+
+					nWgtCur = ((Int64)nLastWgt) * nHours;
+					cWgtCur = nHours;
+
+					nWgtCur += nWgtEstCur;
+					cWgtCur += cWgtEstCur;
+					}
+				bgePrev = bge;
+				nLastWgt = bge.Reading;
+				dttmLastWgt = bge.Date;
+
+				nTotalLifetimeWgt += nWgtCur;
+				cTotalLifetimeWgt += cWgtCur;
+
+				int nFast = 0;
+				int cFast = 0;
+
+				// see if this one is a fasting
+				if (bge.Date > dttmNextFast)
+					{
+					nFast = bge.Reading;
+					cFast = 1;
+					}
+
+				foreach (STN stn in rgstn)
+					{
+					if (bge.Date >= stn.dttmCutoff)
+						{
+						stn.nTotal += bge.Reading;
+						stn.cTotal++;
+						stn.nFastTotal += nFast;
+						stn.cFastTotal += cFast;
+						stn.nWgtTotal += nWgtCur;
+						stn.cWgtTotal += cWgtCur;
+						}
+					}
+
 				if (bge.Date >= dttm30)
 					{
 					nTotal30 += bge.Reading;
@@ -3378,6 +4183,9 @@ public class _bg : System.Windows.Forms.Form
 
 		m_nLifetimeAverage = nTotalLifetime/ cLifetime;
 		m_nLifetimeFastingAverage = nTotalFastingLifetime / cFastingLifetime;
+		m_nLifetimeAverageWgt = (int)(nTotalLifetimeWgt / cTotalLifetimeWgt);
+		float dA1c = (m_nLifetimeAverageWgt + 77.3f) / 35.6f;
+
 		m_n30DayAverage = nTotal30 / c30;
 		m_n30DayFastingAverage = nTotalFasting30 / cFasting30;
 		m_n15DayAverage = nTotal15 / c15;
@@ -3385,8 +4193,20 @@ public class _bg : System.Windows.Forms.Form
 		m_n7DayAverage = nTotal7 / c7;
 		m_n7DayFastingAverage = nTotalFasting7 / cFasting7;
 
+		if (rgstn[0].Avg != m_nLifetimeAverage) throw(new Exception("mismatch!"));
+		if (rgstn[0].FastAvg != m_nLifetimeFastingAverage) throw(new Exception("mismatch!"));
+
+		if (rgstn[2].Avg != m_n30DayAverage) throw(new Exception("mismatch!"));
+		if (rgstn[2].FastAvg != m_n30DayFastingAverage) throw(new Exception("mismatch!"));
+		if (rgstn[3].Avg != m_n15DayAverage) throw(new Exception("mismatch!"));
+		if (rgstn[3].FastAvg != m_n15DayFastingAverage) throw(new Exception("mismatch!"));
+		if (rgstn[4].Avg != m_n7DayAverage) throw(new Exception("mismatch!"));
+		if (rgstn[4].FastAvg != m_n7DayFastingAverage) throw(new Exception("mismatch!"));
+
 		m_ebLifetimeAvg.Text = m_nLifetimeAverage.ToString();
 		m_ebFastingAvg.Text = m_nLifetimeFastingAverage.ToString();
+		m_ebAvgWgt.Text = m_nLifetimeAverageWgt.ToString();
+		m_ebA1c.Text = dA1c.ToString();
 		m_ebAvg30.Text = m_n30DayAverage.ToString();
 		m_ebFastingAvg30.Text = m_n30DayFastingAverage.ToString();
 		m_ebAvg15.Text = m_n15DayAverage.ToString();
@@ -3399,11 +4219,6 @@ public class _bg : System.Windows.Forms.Form
 	private void ChangeTabs(object sender, System.EventArgs e) 
 	{
 		TabControl tabc = (TabControl)sender;
-		if (m_ebFirst.Text.Length <= 0)
-			{
-			m_rbCustom.Checked = true;
-			EnableCustomDates(null, null);
-			}
 
 		if (tabc.SelectedIndex == 1 && m_fDirtyStats)
 			{
@@ -3460,6 +4275,305 @@ public class _bg : System.Windows.Forms.Form
 		m_ebFirst.Enabled = true;
 		m_ebLast.Enabled = true;
 	}
+
+	private void SelectDateRange(object sender, System.EventArgs e) 
+	{
+		ComboBox cbx = (ComboBox)sender;
+		
+		if (cbx.Text == "7 Days")
+			Setup7DayGraph(sender, e);
+		else if (cbx.Text == "15 Days")
+			Setup15DayGraph(sender, e);
+		else if (cbx.Text == "30 Days")
+			Setup30DayGraph(sender, e);
+		else
+			EnableCustomDates(sender, e);
+	}
+
+	public class DevComm : CommBase
+	{
+		CommBaseSettings m_cbs;
+
+		protected override CommBaseSettings CommSettings()
+		{
+			return m_cbs;
+		}
+
+		public void Init()
+		{
+			m_cbs = new CommBaseSettings();
+
+			m_cbs.SetStandard("COM3:", 9600, CommBase.Handshake.none);
+			rgbRxBuffer = new byte[512];
+		}
+
+		void SendCommand(string s)
+		{
+			byte []rgb = new byte[Encoding.ASCII.GetByteCount(s)];
+			byte []rgbString = Encoding.ASCII.GetBytes(s);
+
+			Buffer.BlockCopy(rgbString, 0, rgb, 0, rgbString.Length);
+			
+			int iMac = rgbString.Length;
+			int i;
+
+			for (i = 0; i < iMac; i++)
+				{
+				Send(rgb[i]);
+				Sleep(150);
+				}
+//			Send(rgb);
+		}
+
+		private byte[] rgbRxBuffer;
+		private uint ibRxBuffer = 0;
+		private ASCII[] rgbRxTerm = { ASCII.CR, ASCII.LF };
+		private ASCII[] TxTerm;
+		private ASCII[] RxFilter;
+		private string RxString = "";
+		private ManualResetEvent TransFlag = new ManualResetEvent(true);
+
+		private uint TransTimeout;
+		int ibRxTermWaiting = 0;
+		ArrayList pls = new ArrayList();
+
+		void OnRxLine(string s)
+		{
+			lock(pls)
+				{
+				pls.Add(s);
+				}
+		}
+
+		protected override void OnRxChar(byte ch) 
+		{
+			ASCII ca = (ASCII)ch;
+			if (ibRxTermWaiting < rgbRxTerm.Length)
+				{
+				if (ca == rgbRxTerm[ibRxTermWaiting])
+					ibRxTermWaiting++;
+				else
+					ibRxTermWaiting = 0;	// bail out if we didn't get the next ASCII char in the sequence
+				}
+
+			if (ibRxTermWaiting >= rgbRxTerm.Length
+				|| (ibRxBuffer > rgbRxBuffer.GetUpperBound(0)))
+				{
+				//JH 1.1: Use static encoder for efficiency. Thanks to Prof. Dr. Peter Jesorsky!
+				lock(RxString) 
+					{
+					RxString = Encoding.ASCII.GetString(rgbRxBuffer, 0, (int)ibRxBuffer - ibRxTermWaiting);
+					}
+				ibRxBuffer = 0;
+				ibRxTermWaiting = 0;
+				if (TransFlag.WaitOne(0,false)) 
+					{
+//					ThrowException("Received line when noone was looking!");
+					OnRxLine(RxString);
+					}
+				else 
+					{
+					TransFlag.Set();
+					}
+				}
+			else
+				{
+				bool wr = true;
+//				if (RxFilter != null) 
+//					{
+//					for (int i=0; i <= RxFilter.GetUpperBound(0); i++) 
+//						if (RxFilter[i] == ca) 
+//							wr = false;
+//					}
+
+				if (wr)
+					{
+					rgbRxBuffer[ibRxBuffer] = ch;
+					ibRxBuffer++;
+					}
+				}
+		}
+
+		public ArrayList GetReadings()
+		{
+			// actually read the data
+			lock(pls)
+				{
+				pls.Clear();
+				}
+
+			TransFlag.Reset();
+			SendCommand("DMP");
+			// the first line we get back will tell us how many lines to expect
+			if (!TransFlag.WaitOne((int)5000, false))
+				ThrowException("Timeout");
+
+			// more lines are coming in, they are being collected in pls
+			string s;
+			lock(RxString)
+				{
+				s = RxString;
+				}
+
+			// find the leading "P"
+			int ibp = s.IndexOf('P');
+			if (ibp < 0)
+				return null;
+
+			int cLines = Int32.Parse(s.Substring(ibp + 2, 3));
+
+			// and now we wait for that many lines to show up in pls
+			int cMsecsTimeout = 20000;
+			ArrayList plsFinal = null;
+			int count = 0;
+
+			while (cMsecsTimeout > 0 && plsFinal == null)
+				{
+				lock (pls)
+					{
+					if (pls.Count >= cLines)
+						plsFinal = pls;
+					count = pls.Count;
+					}
+				Sleep(2000);
+				cMsecsTimeout -= 2000;
+				}
+
+			if (plsFinal == null)
+				{
+				MessageBox.Show("Only got " + count.ToString()+" readings, expected " + cLines.ToString());
+				return null;
+				}
+
+			return plsFinal;
+		}
+
+		public bool CheckDevice()
+		{
+			SendCommand("DM");
+			Sleep(500);
+			TransFlag.Reset();
+			SendCommand("DM?");
+
+			// expecting one line back
+			if (!TransFlag.WaitOne((int)500, false))
+				ThrowException("Timeout");
+			string s;
+			lock(RxString)
+				{
+				s = RxString;
+				}
+			if (s.Substring(0,1) != "?")
+				return false;
+
+			return true;
+		}
+
+		public void CloseDevice()
+		{
+			this.Close();
+		}
+	}
+
+	ArrayList GetReadingsFromDevice()
+	{
+		ArrayList pls = new ArrayList();
+
+		StreamReader sr = new StreamReader("c:\\temp\\dmp1.txt");
+		string s;
+
+		s = sr.ReadLine();	// consume the first one
+		while ((s = sr.ReadLine()) != null)
+			pls.Add(s);
+
+		sr.Close();
+		return pls;
+	}
+
+	string SGetNextQuotedField(string s, int iFirst, out int iNext)
+	{
+		int ib;
+		iNext = 0;
+		ib = s.IndexOf('"', iFirst);
+		if (ib < iFirst)
+			return null;
+
+		int ib2 = s.IndexOf('"', ib + 1);
+		if (ib2 < ib)
+			return null;
+
+		string sRet = s.Substring(ib + 1, ib2 - ib - 1);
+		if (ib2 + 1 >= s.Length)
+			iNext = -1;
+		else
+			iNext = ib2 + 1;
+
+		return sRet;
+	}
+
+	private void ReadFromDevice(object sender, System.EventArgs e) 
+	{
+		ArrayList pls = GetReadingsFromDeviceReal();
+
+		foreach (string s in pls)
+			{
+			int iFirst = 0, iNext;
+
+			if (s.Substring(0, 2) != "P ")
+				continue;
+
+			string sDay = SGetNextQuotedField(s, iFirst, out iNext);
+			string sDate = SGetNextQuotedField(s, iFirst = iNext, out iNext);
+			string sTime = SGetNextQuotedField(s, iFirst = iNext, out iNext);
+			string sReading = SGetNextQuotedField(s, iFirst = iNext, out iNext);
+
+			BGE bge = new BGE(sDate, sTime, BGE.ReadingType.New, Int32.Parse(sReading), 0, "");
+
+			AddEntryCore(bge, true);
+			}
+	}
+
+	private ArrayList GetReadingsFromDeviceReal() 
+	{
+		DevComm devComm = new DevComm();
+
+		devComm.Init();
+		CommBase.PortStatus ps = devComm.IsPortAvailable("COM3:");
+
+		if (ps != CommBase.PortStatus.available)
+			{
+			MessageBox.Show("COM3 unavailable");
+			return null;
+			}
+
+		if (!devComm.Open())
+			{
+			MessageBox.Show("COM3 unable to open");
+			return null;
+			}
+
+		if (!devComm.CheckDevice())
+			{
+			MessageBox.Show("OTU did not respond appropriately to DM?");
+			return null;
+			}
+
+		ArrayList pls = devComm.GetReadings();
+
+		if (pls == null)
+			{
+			MessageBox.Show("OTU did not provide readings");
+			return null;
+			}
+
+		devComm.CloseDevice();
+		return pls;
+	}
+
+	private void groupBox5_Enter(object sender, System.EventArgs e) {
+	
+	}
+
 
 
 }}

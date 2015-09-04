@@ -259,6 +259,7 @@ public interface GraphicBox
 	bool FHitTest(Point pt, out object oHit, out RectangleF rectfHit);
 	void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh);
 	void SetProps(GrapherParams gp);
+	int GetFirstForScroll();
 }
 
 //	 ______ _______  _____   _____   ______ _______ _______  ______
@@ -525,6 +526,18 @@ public class Reporter : GraphicBox
 		return m_iLineFirst;
 	}
 
+	/* G E T  F I R S T  F O R  S C R O L L */
+	/*----------------------------------------------------------------------------
+		%%Function: GetFirstForScroll
+		%%Qualified: bg.Reporter.GetFirstForScroll
+		%%Contact: rlittle
+
+	----------------------------------------------------------------------------*/
+	public int GetFirstForScroll()
+	{
+		return m_iLineFirst;
+	}
+
 	/* G E T  F I R S T  D A T E  T I M E */
 	/*----------------------------------------------------------------------------
 		%%Function: GetFirstDateTime
@@ -751,7 +764,6 @@ public class Reporter : GraphicBox
 	public void SetDataPoints(SortedList slbge, VScrollBar sbv, HScrollBar sbh)
 	{
 		m_slbge = slbge;
-		VScrollBar sbv = (VScrollBar)oScrollBar;
 
 		// figure out how many lines we're going to have...
 		// get the first entry and the last
@@ -1162,6 +1174,11 @@ public class Grapher : GraphicBox
 	public int GetFirstQuarter()
 	{
 		return m_iFirstQuarter;
+	}
+
+	public int GetFirstForScroll()
+	{
+		return GetFirstQuarter();
 	}
 
 	public DateTime GetFirstDateTime()
@@ -1870,7 +1887,6 @@ public class _bg : System.Windows.Forms.Form
 	private System.Windows.Forms.Label label10;
 	private System.Windows.Forms.TextBox m_ebLast;
 	private System.Windows.Forms.TextBox m_ebFirst;
-	private System.Windows.Forms.CheckBox m_cbLogReport;
 	private System.Windows.Forms.Label label30;
 	private System.Windows.Forms.Label label31;
 	private System.Windows.Forms.ComboBox m_cbxUpper;
@@ -1943,7 +1959,6 @@ public class _bg : System.Windows.Forms.Form
 		this.m_cbxUpper = new System.Windows.Forms.ComboBox();
 		this.label31 = new System.Windows.Forms.Label();
 		this.label30 = new System.Windows.Forms.Label();
-		this.m_cbLogReport = new System.Windows.Forms.CheckBox();
 		this.m_cbShowMeals = new System.Windows.Forms.CheckBox();
 		this.m_rbCustom = new System.Windows.Forms.RadioButton();
 		this.m_rb30Days = new System.Windows.Forms.RadioButton();
@@ -2193,7 +2208,6 @@ public class _bg : System.Windows.Forms.Form
 																					this.m_cbxUpper,
 																					this.label31,
 																					this.label30,
-																					this.m_cbLogReport,
 																					this.m_cbShowMeals,
 																					this.m_rbCustom,
 																					this.m_rb30Days,
@@ -2274,13 +2288,6 @@ public class _bg : System.Windows.Forms.Form
 		this.label30.Size = new System.Drawing.Size(64, 23);
 		this.label30.TabIndex = 35;
 		this.label30.Text = "Upper Box";
-		// 
-		// m_cbLogReport
-		// 
-		this.m_cbLogReport.Location = new System.Drawing.Point(304, 104);
-		this.m_cbLogReport.Name = "m_cbLogReport";
-		this.m_cbLogReport.TabIndex = 34;
-		this.m_cbLogReport.Text = "&LogBook";
 		// 
 		// m_cbShowMeals
 		// 
@@ -3144,7 +3151,7 @@ public class _bg : System.Windows.Forms.Form
 		if (m_ebHigh.Text.Length > 0)
 			nHigh = Int32.Parse(m_ebHigh.Text);
 
-		bgg.SetBounds(nLow, nHigh, nDays, nIntervals, m_cbShowMeals.Checked, m_cbLogReport.Checked);
+		bgg.SetBounds(nLow, nHigh, nDays, nIntervals, m_cbShowMeals.Checked);
 	}
 
 	private void GraphFast(object sender, System.EventArgs e) 

@@ -90,7 +90,6 @@ namespace bg
 			%%Function: SetupViews
 			%%Qualified: bg.BgGraph.SetupViews
 			%%Contact: rlittle
-
 			
 		----------------------------------------------------------------------------*/
 		void SetupViews(int nHeight)
@@ -270,7 +269,8 @@ namespace bg
 
 		void SetPbDataPoints(PictureBox pb, VScrollBar sbv, HScrollBar sbh)
 		{
-			((GraphicBox)pb.Tag).SetDataPoints(m_slbge, sbv, sbh);
+			if (pb.Tag != null)
+				((GraphicBox)pb.Tag).SetDataPoints(m_slbge, sbv, sbh);
 		}
 
 
@@ -289,7 +289,6 @@ namespace bg
 				((Grapher)pb.Tag).SetProps(m_gp);
 		}
 
-		bool m_fLog;
 		/* S E T  B O U N D S */
 		/*----------------------------------------------------------------------------
 			%%Function: SetBounds
@@ -297,14 +296,13 @@ namespace bg
 			%%Contact: rlittle
 
 		----------------------------------------------------------------------------*/
-		public void SetBounds(double dLow, double dHigh, int nDays, int nBgIntervals, bool fShowMeals, bool fLog)
+		public void SetBounds(double dLow, double dHigh, int nDays, int nBgIntervals, bool fShowMeals)
 		{
 			m_gp.dBgLow = dLow;
 			m_gp.dBgHigh = dHigh;
 			m_gp.nDays = nDays;
 			m_gp.nIntervals = nBgIntervals;
 			m_gp.fShowMeals = fShowMeals;
-			m_fLog = fLog;
 			SetPbBounds(m_picbUpper);
 			SetPbBounds(m_picbLower);
 		}
@@ -371,9 +369,6 @@ namespace bg
 			return BoxView.None;
 		}
 
-//		public Grapher m_grph;
-//		public Reporter m_rpt;
-
 
 		private void PaintGraph(object sender, System.Windows.Forms.PaintEventArgs e) 
 		{
@@ -428,28 +423,35 @@ namespace bg
 											pb.Width - Reporter.DxpFromDxa(gr, 200), 
 											pb.Height - Reporter.DypFromDya(gr, 200));
 
+			int iFirst = ((GraphicBox)pb.Tag).GetFirstForScroll();
+
 			if (BvFromPb(pb) == BoxView.Graph)
 				{
 				Grapher grph = new Grapher(rcf, gr);
 
-				grph.SetProps(m_gp);
-				grph.SetDataPoints(m_slbge);
-				grph.SetFirstQuarter(sbh.Value);
+//				grph.SetProps(m_gp);
+//				grph.SetDataPoints(m_slbge);
+//				grph.SetFirstQuarter(sbh.Value);
 
-				grph.CalcGraph(sbh);
+//				grph.CalcGraph(sbh);
 
 				pb.Tag = grph;
 				}
 			else if (BvFromPb(pb) == BoxView.Log)
 				{
 				Reporter rpt = new Reporter(rcf, gr); // pb.Width, pb.Height, 
-				rpt.SetProps(m_gp);
-				rpt.SetDataPoints(m_slbge, sbv);
-				rpt.CalcReport();
-				rpt.SetFirstLine(sbv.Value);
+//				rpt.SetProps(m_gp);
+//				rpt.SetDataPoints(m_slbge, sbv);
+//				rpt.CalcReport();
+//				rpt.SetFirstLine(sbv.Value);
 
 				pb.Tag = rpt;
 				}
+			((GraphicBox)pb.Tag).SetProps(m_gp);
+			((GraphicBox)pb.Tag).SetDataPoints(m_slbge, sbv, sbh);
+			((GraphicBox)pb.Tag).Calc();
+			((GraphicBox)pb.Tag).SetFirstFromScroll(iFirst);
+
 			pb.Invalidate();
 		}
 
@@ -462,16 +464,8 @@ namespace bg
 
 		void CalcPictureBox(PictureBox pb, HScrollBar sbh)
 		{
-			if (BvFromPb(pb) == BoxView.Log)
-				{
-				Reporter rpt = (Reporter)pb.Tag;
-				rpt.CalcReport();
-				}
-			else if (BvFromPb(pb) == BoxView.Graph)
-				{
-				Grapher grph = (Grapher)pb.Tag;
-				grph.CalcGraph(sbh);
-				}
+			if (pb.Tag != null)
+				((GraphicBox)pb.Tag).Calc();
 		}
 
 		public void CalcGraph()
@@ -495,9 +489,10 @@ namespace bg
 			PTFI ptfiHit = new PTFI();
 			bool fHit = false;
 			RectangleF rectfHit;
+			object oHit;
 
-			fHit = grph.FHitTest(pt, out ptfiHit, out rectfHit);
-
+			fHit = grph.FHitTest(pt, out oHit, out rectfHit);
+			ptfiHit = (PTFI)oHit;
 			if (fHit)
 				{
 				if (m_ch == null)
@@ -541,10 +536,8 @@ namespace bg
 
 			grph.SetProps(m_gp);
 			grph.DrawBanner(ev.Graphics, rcfBanner);
-//					grph.SetMargins(rectMargins.Left, rectPage.Width - rectMargins.Right, rectMargins.Top, rectPage.Height - rectMargins.Bottom);
 			grph.SetFirstQuarter(grphRef.GetFirstQuarter());
-			grph.SetDataPoints(m_slbge);
-			grph.CalcGraph(null);
+			grph.SetDataPoints(m_slbge, null, null);
 			grph.Paint(ev.Graphics);
 		}
 
@@ -553,10 +546,9 @@ namespace bg
 			Reporter rpt = new Reporter(rcf, ev.Graphics);
 
 			rpt.SetProps(m_gp);
-			rpt.SetDataPoints(m_slbge, null);
-//					grph.SetMargins(rectMargins.Left, rectPage.Width - rectMargins.Right, rectMargins.Top, rectPage.Height - rectMargins.Bottom);
+			rpt.SetDataPoints(m_slbge, null, null);
 			rpt.SetFirstLine(rptRef.GetFirstLine());
-			rpt.CalcReport();
+			rpt.Calc();
 			rpt.Paint(ev.Graphics);
 		}
 
@@ -570,7 +562,6 @@ namespace bg
 
 //			ev.Graphics.DrawRectangle(new Pen(new SolidBrush(Color.Blue), 1.0F), rectMargins);
 			int nPctUpper = 70;
-			int nPctLower = 30;
 			int nMarginTop = (int)Reporter.DypFromDya(ev.Graphics, 25);
 			int nMarginBetween = nMarginTop;
 			int nHeightTotal = rectMargins.Bottom - rectMargins.Top;
@@ -578,15 +569,9 @@ namespace bg
 			int nWidth = rectMargins.Right - rectMargins.Left - (int)Reporter.DxpFromDxa(ev.Graphics, 10);
 
 			if (m_bvUpper == BoxView.None)
-				{
-				nPctLower = 100;
 				nPctUpper = 0;
-				}
 			else if (m_bvLower == BoxView.None)
-				{
 				nPctUpper = 100;
-				nPctLower = 0;
-				}
 
 			// we have to apportion the regions...
 			RectangleF rcfUpperBanner = new RectangleF(0, 0, nWidth, nMarginTop);
